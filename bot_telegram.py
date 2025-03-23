@@ -15,7 +15,7 @@ from logging.handlers import RotatingFileHandler
 
 # === CARGAR VARIABLES DE ENTORNO ===
 load_dotenv()
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 # === VALIDAR TOKEN ===
 if not TELEGRAM_TOKEN or len(TELEGRAM_TOKEN) < 30:

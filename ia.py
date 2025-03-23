@@ -10,7 +10,8 @@ from typing import List
 from datetime import datetime
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
-from openai import OpenAIError, OpenAI
+from openai import OpenAIError  # para capturar errores de OpenAI
+import openai
 from httpx import HTTPError
 from logging.handlers import RotatingFileHandler
 from prometheus_client import Histogram, start_http_server
@@ -19,11 +20,13 @@ from circuitbreaker import circuit
 
 # === CONFIGURACIÓN GENERAL ===
 TABLA_EMBEDDINGS = os.getenv("TABLA_EMBEDDINGS", "documentos_embeddings")
+# Si prefieres usar el modelo de SentenceTransformers (local) puedes dejarlo así:
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+# Si deseas usar el modelo de OpenAI para embeddings, deberás ajustar la lógica en las funciones de vectorización.
 TOP_K = int(os.getenv("TOP_K", 3))
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "TU_API_KEY")
 
-# === LOGGING ===
+# === CONFIGURAR LOGGING ===
 def configurar_logging(nombre_modulo: str):
     logger = logging.getLogger(nombre_modulo)
     if logger.handlers:
@@ -49,7 +52,7 @@ CONTEXTO_LENGTH = Histogram('contexto_length', 'Longitud del contexto en palabra
 # === CARGAR VARIABLES DE ENTORNO ===
 load_dotenv()
 os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
-openai = OpenAI(api_key=OPENAI_API_KEY)
+openai.api_key = OPENAI_API_KEY
 
 # === MODELO DE EMBEDDINGS (singleton) ===
 _modelo = None
@@ -62,6 +65,7 @@ def get_modelo():
 
 # === SANITIZACIÓN DE PREGUNTA ===
 def sanitizar_pregunta(pregunta: str, max_length=500) -> str:
+    # Se eliminan caracteres no alfanuméricos (permitiendo acentos, ñ y signos de interrogación)
     pregunta = re.sub(r'[^\w\sáéíóúñ¿?]', '', pregunta.strip())
     return pregunta[:max_length]
 
@@ -69,6 +73,7 @@ def sanitizar_pregunta(pregunta: str, max_length=500) -> str:
 def vectorizar_pregunta(pregunta: str) -> List[float]:
     try:
         modelo = get_modelo()
+        # Codifica la pregunta a un vector NumPy
         return modelo.encode([pregunta], convert_to_numpy=True)[0]
     except Exception as e:
         logger.error(f"❌ Error vectorizando pregunta: {e}")
@@ -78,9 +83,11 @@ def vectorizar_pregunta(pregunta: str) -> List[float]:
 def similitud_coseno(v1: List[float], v2: List[float]) -> float:
     v1 = np.array(v1)
     v2 = np.array(v2)
-    if np.linalg.norm(v1) == 0 or np.linalg.norm(v2) == 0:
+    norm_v1 = np.linalg.norm(v1)
+    norm_v2 = np.linalg.norm(v2)
+    if norm_v1 == 0 or norm_v2 == 0:
         return 0.0
-    return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+    return np.dot(v1, v2) / (norm_v1 * norm_v2)
 
 # === TRUNCAR CONTEXTO ===
 def truncar_contexto(contexto: str, max_palabras: int = 1500) -> str:
@@ -134,7 +141,7 @@ def responder_con_gpt(pregunta: str, contexto: str) -> str:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Contexto:\n{contexto}\n\nPregunta: {pregunta}"}
         ]
-        completion = openai.chat.completions.create(
+        completion = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=messages,
             temperature=0.2,
@@ -174,10 +181,9 @@ def responder_pregunta(pregunta: str, user_id: str = None) -> str:
 # === TEST MANUAL ===
 if __name__ == "__main__":
     try:
-        start_http_server(8010)
+        start_http_server(8010)  # Inicia el servidor de métricas en el puerto 8010
         pregunta = input("❓ Escribe tu pregunta: ")
         respuesta = responder_pregunta(pregunta)
         print(f"🧠 Respuesta:\n{respuesta}")
     except Exception as e:
         logger.error(f"❌ Error en ejecución directa: {e}")
-

@@ -1,9 +1,9 @@
-# === Archivos de configuración privada ===
+# Archivos de configuración privada
 .env
 *.key
 *.pem
 
-# === Carpetas locales ===
+# Carpetas y archivos de caché
 __pycache__/
 *.pyc
 *.pyo
@@ -11,20 +11,20 @@ __pycache__/
 venv/
 .env/
 
-# === Archivos de logs ===
+# Archivos de logs
 *.log
 
-# === Archivos de datasets o resultados ===
+# Datos y bases de datos locales
 *.csv
 *.sqlite
 *.db
 *.jsonl
 
-# === Archivos del sistema ===
+# Archivos del sistema
 .DS_Store
 Thumbs.db
 
-# === Archivos temporales o de backup ===
+# Archivos temporales o de backup
 *.bak
 *.tmp
 *.swp
