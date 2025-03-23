@@ -98,10 +98,14 @@ def truncar_contexto(contexto: str, max_palabras: int = 1500) -> str:
 
 # === BÚSQUEDA DE CONTEXTO CON RPC VECTORIAL ===
 def obtener_contexto_relevante(pregunta: str, supabase, k=TOP_K) -> str:
+    """
+    Se llama a la función RPC 'vector_search' en Supabase, que debe
+    devolver registros con el campo 'embedding_vector'.
+    """
     try:
         logger.info("🔍 Recuperando contexto relevante...")
         pregunta_vector = vectorizar_pregunta(pregunta)
-        # Se asume que la función RPC 'vector_search' de Supabase utiliza el campo 'embedding'
+        # Ajustar la función RPC y sus parámetros según tu implementación en Supabase
         response = supabase.rpc('vector_search', {
             'query_embedding': pregunta_vector,
             'match_count': k * 2
@@ -113,8 +117,8 @@ def obtener_contexto_relevante(pregunta: str, supabase, k=TOP_K) -> str:
 
         resultados = []
         for doc in response.data:
-            # Se espera que el vector esté en el campo 'embedding'
-            embedding = doc.get("embedding")
+            # Ajustar el campo según la columna real donde se guarde el embedding
+            embedding = doc.get("embedding_vector")
             if isinstance(embedding, list) and embedding:
                 score = similitud_coseno(pregunta_vector, embedding)
                 SIMILITUD_SCORE.observe(score)
@@ -132,6 +136,9 @@ def obtener_contexto_relevante(pregunta: str, supabase, k=TOP_K) -> str:
 @circuit(failure_threshold=3, recovery_timeout=60)
 @GPT_RESPONSE_LATENCY.time()
 def responder_con_gpt(pregunta: str, contexto: str) -> str:
+    """
+    Genera una respuesta con ChatCompletion de OpenAI usando el contexto provisto.
+    """
     try:
         system_prompt = (
             "Eres un asistente de administración de fincas. Responde solo en base a la información del contexto. "
@@ -156,6 +163,9 @@ def responder_con_gpt(pregunta: str, contexto: str) -> str:
 _respuestas_cache = {}
 
 def responder_pregunta(pregunta: str, user_id: str = None) -> str:
+    """
+    Función principal que orquesta la obtención del contexto relevante y la generación de respuesta.
+    """
     session_id = str(uuid.uuid4())[:8]
     pregunta = sanitizar_pregunta(pregunta)
     if not pregunta:
@@ -181,7 +191,8 @@ def responder_pregunta(pregunta: str, user_id: str = None) -> str:
 # === TEST MANUAL ===
 if __name__ == "__main__":
     try:
-        start_http_server(8010)  # Inicia el servidor de métricas en el puerto 8010
+        # Inicia el servidor de métricas en el puerto 8010
+        start_http_server(8010)
         pregunta = input("❓ Escribe tu pregunta: ")
         respuesta = responder_pregunta(pregunta)
         print(f"🧠 Respuesta:\n{respuesta}")
