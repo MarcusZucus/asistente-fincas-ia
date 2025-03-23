@@ -5,13 +5,11 @@ import re
 import json
 import uuid
 import numpy as np
-import functools
 from typing import List
 from datetime import datetime
 from dotenv import load_dotenv
-from sentence_transformers import SentenceTransformer
-from openai import OpenAIError  # para capturar errores de OpenAI
 import openai
+from openai import OpenAIError  # para capturar errores de OpenAI
 from httpx import HTTPError
 from logging.handlers import RotatingFileHandler
 from prometheus_client import Histogram, start_http_server
@@ -20,9 +18,8 @@ from circuitbreaker import circuit
 
 # === CONFIGURACIÓN GENERAL ===
 TABLA_EMBEDDINGS = os.getenv("TABLA_EMBEDDINGS", "documentos_embeddings")
-# Si prefieres usar el modelo de SentenceTransformers (local) puedes dejarlo así:
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-# Si deseas usar el modelo de OpenAI para embeddings, deberás ajustar la lógica en las funciones de vectorización.
+# Se usará el modelo de OpenAI para vectorización, por lo que definimos:
+OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-ada-002")
 TOP_K = int(os.getenv("TOP_K", 3))
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "TU_API_KEY")
 
@@ -54,29 +51,21 @@ load_dotenv()
 os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 openai.api_key = OPENAI_API_KEY
 
-# === MODELO DE EMBEDDINGS (singleton) ===
-_modelo = None
-def get_modelo():
-    global _modelo
-    if _modelo is None:
-        _modelo = SentenceTransformer(EMBEDDING_MODEL)
-        logger.info(f"✅ Modelo de embeddings cargado: {EMBEDDING_MODEL}")
-    return _modelo
-
 # === SANITIZACIÓN DE PREGUNTA ===
 def sanitizar_pregunta(pregunta: str, max_length=500) -> str:
     # Se eliminan caracteres no alfanuméricos (permitiendo acentos, ñ y signos de interrogación)
     pregunta = re.sub(r'[^\w\sáéíóúñ¿?]', '', pregunta.strip())
     return pregunta[:max_length]
 
-# === VECTORIZACIÓN DE PREGUNTA ===
+# === VECTORIZACIÓN DE PREGUNTA (con OpenAI) ===
 def vectorizar_pregunta(pregunta: str) -> List[float]:
     try:
-        modelo = get_modelo()
-        # Codifica la pregunta a un vector NumPy
-        return modelo.encode([pregunta], convert_to_numpy=True)[0]
+        # Usamos la API de OpenAI para generar el embedding de la pregunta
+        response = openai.Embedding.create(input=[pregunta], model=OPENAI_EMBEDDING_MODEL)
+        vector = response["data"][0]["embedding"]
+        return vector
     except Exception as e:
-        logger.error(f"❌ Error vectorizando pregunta: {e}")
+        logger.error(f"❌ Error vectorizando pregunta con OpenAI: {e}")
         raise
 
 # === SIMILITUD COSENO ===
@@ -102,7 +91,9 @@ def truncar_contexto(contexto: str, max_palabras: int = 1500) -> str:
 def obtener_contexto_relevante(pregunta: str, supabase, k=TOP_K) -> str:
     try:
         logger.info("🔍 Recuperando contexto relevante...")
-        pregunta_vector = vectorizar_pregunta(pregunta).tolist()
+        # Vectorizamos la pregunta usando OpenAI
+        pregunta_vector = vectorizar_pregunta(pregunta)
+        # Se asume que el RPC 'vector_search' existe y retorna documentos con el campo 'embedding' y 'contenido'
         response = supabase.rpc('vector_search', {
             'query_embedding': pregunta_vector,
             'match_count': k * 2
