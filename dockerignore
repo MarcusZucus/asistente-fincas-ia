@@ -1,0 +1,30 @@
+# === Archivos de configuración privada ===
+.env
+*.key
+*.pem
+
+# === Carpetas locales ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+.env/
+
+# === Archivos de logs ===
+*.log
+
+# === Archivos de datasets o resultados ===
+*.csv
+*.sqlite
+*.db
+*.jsonl
+
+# === Archivos del sistema ===
+.DS_Store
+Thumbs.db
+
+# === Archivos temporales o de backup ===
+*.bak
+*.tmp
+*.swp
