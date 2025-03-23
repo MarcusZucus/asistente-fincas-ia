@@ -1,9 +1,9 @@
 import sys
-# Reconfiguramos stdout y stderr para UTF-8
+# Reconfiguramos stdout y stderr para usar UTF-8
 try:
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stderr.reconfigure(encoding='utf-8')
-except Exception as e:
+except Exception:
     pass
 
 import logging
@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime
 from urllib.parse import urlparse
 from dotenv import load_dotenv
-import openai
+import openai  # Asegúrate de usar openai==0.28 para compatibilidad con openai.Embedding.create
 from supabase import create_client
 from typing import List, Dict
 from logging.handlers import RotatingFileHandler
@@ -30,13 +30,13 @@ BATCH_SIZE = int(os.getenv("BATCH_SIZE", 500))
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", 2048))
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", 3))
 
-# Tablas de donde extraer datos (en tu caso, no hay tabla "documentos")
+# Tablas de donde extraer datos (solo se usan las que tienes)
 TABLA_ADMINISTRACIONES = "administraciones"
 TABLA_FINCAS = "fincas"
 TABLA_USUARIOS = "usuarios"
 TABLA_INCIDENCIAS = "incidencias"
 
-# Tabla destino para embeddings
+# Tabla destino para embeddings (configurable mediante variable de entorno)
 TABLA_DESTINO = os.getenv("TABLA_DESTINO", "documentos_embeddings")
 
 # === CONFIGURAR LOGGING ROTATIVO (sin emojis) ===
@@ -81,7 +81,7 @@ logger.debug("Variables de entorno cargadas correctamente.")
 
 def cargar_administraciones(supabase) -> List[Dict]:
     """
-    Carga y transforma datos desde 'administraciones'.
+    Carga y transforma datos desde la tabla 'administraciones'.
     """
     rows = supabase.table(TABLA_ADMINISTRACIONES).select("*").execute().data
     logger.info(f"(administraciones) Cargados {len(rows)} registros.")
@@ -94,15 +94,12 @@ def cargar_administraciones(supabase) -> List[Dict]:
             continue
         texto = (f"La administración '{a['nombre']}' está en {a['direccion']}, "
                  f"teléfono {a['telefono']}, email {a['email']}.")
-        result.append({
-            "id": a["id"],
-            "contenido": texto
-        })
+        result.append({"id": a["id"], "contenido": texto})
     return result
 
 def cargar_fincas(supabase) -> List[Dict]:
     """
-    Carga y transforma datos desde 'fincas'.
+    Carga y transforma datos desde la tabla 'fincas'.
     """
     rows = supabase.table(TABLA_FINCAS).select("*").execute().data
     logger.info(f"(fincas) Cargados {len(rows)} registros.")
@@ -115,15 +112,12 @@ def cargar_fincas(supabase) -> List[Dict]:
             continue
         texto = (f"La finca '{f['nombre']}' está ubicada en {f['direccion']}, "
                  f"tiene {f['numero_puertas']} puertas y pertenece a la administración con ID {f['administracion_id']}.")
-        result.append({
-            "id": f["id"],
-            "contenido": texto
-        })
+        result.append({"id": f["id"], "contenido": texto})
     return result
 
 def cargar_usuarios(supabase) -> List[Dict]:
     """
-    Carga y transforma datos desde 'usuarios'.
+    Carga y transforma datos desde la tabla 'usuarios'.
     """
     rows = supabase.table(TABLA_USUARIOS).select("*").execute().data
     logger.info(f"(usuarios) Cargados {len(rows)} registros.")
@@ -136,15 +130,12 @@ def cargar_usuarios(supabase) -> List[Dict]:
             continue
         texto = (f"El usuario '{u['nombre']}' es {u['rol']} en la finca '{u['nombre_fincas']}' "
                  f"(dirección: {u['direccion_finca']}), teléfono: {u['telefono_movil']}.")
-        result.append({
-            "id": u["id"],
-            "contenido": texto
-        })
+        result.append({"id": u["id"], "contenido": texto})
     return result
 
 def cargar_incidencias(supabase) -> List[Dict]:
     """
-    Carga y transforma datos desde 'incidencias'.
+    Carga y transforma datos desde la tabla 'incidencias'.
     """
     rows = supabase.table(TABLA_INCIDENCIAS).select("*").execute().data
     logger.info(f"(incidencias) Cargados {len(rows)} registros.")
@@ -158,10 +149,7 @@ def cargar_incidencias(supabase) -> List[Dict]:
         texto = (f"Incidencia tipo '{inc['tipo']}' con urgencia '{inc['urgencia']}' en finca ID {inc['finca_id']}, "
                  f"reportada por usuario ID {inc['usuario_id']}. Teléfono: {inc['telefono_movil']}. "
                  f"Descripción: {inc['descripcion']}.")
-        result.append({
-            "id": inc["id"],
-            "contenido": texto
-        })
+        result.append({"id": inc["id"], "contenido": texto})
     return result
 
 # === PREPROCESAMIENTO DE TEXTO ===
@@ -252,16 +240,12 @@ def conectar_supabase():
 # === EJECUCIÓN DIRECTA ===
 if __name__ == "__main__":
     try:
-        # Iniciar servidor Prometheus para métricas en puerto 8000
+        # Iniciar servidor Prometheus para métricas en el puerto 8000
         start_http_server(8000)
         logger.info("Servidor Prometheus iniciado en el puerto 8000.")
         
         # 1. Conectarse a Supabase
         supabase = conectar_supabase()
-        
-        # Listar tablas (opcional) para validar nombres
-        # La función listar_tablas se puede omitir si no es necesaria
-        # (Aquí se omite, ya que solo se usan las 4 tablas disponibles)
         
         # 2. Cargar datos de las tablas disponibles
         logger.info("Cargando datos desde las tablas: administraciones, fincas, usuarios e incidencias...")
@@ -314,7 +298,7 @@ if __name__ == "__main__":
                 "embedding": embeddings[i],
                 "vectorizado_en": datetime.utcnow().isoformat()
             }
-            # Para generar un nuevo UUID para la tabla destino, descomenta la siguiente línea:
+            # Para asignar un nuevo UUID a cada registro, descomenta la siguiente línea:
             # item["id"] = str(uuid.uuid4())
             datos_con_embeddings.append(item)
         
