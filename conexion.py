@@ -115,4 +115,4 @@ if __name__ == "__main__":
         cliente = conectar_supabase()
         probar_conexion(cliente)
     except Exception as e:
-        logger.error(f"🚨 Error general durante test: {e}")  que piensas ? es mejor que el anterior? como lo ves ?
+        logger.error(f"🚨 Error general durante test: {e}")  # que piensas? ¿Es mejor que el anterior? ¿Cómo lo ves?
