@@ -17,9 +17,12 @@ CONNECTION_LATENCY = Histogram('supabase_connection_latency_seconds', 'Latencia 
 
 # === CONFIGURAR LOGGING ===
 def configurar_logging(nombre_modulo: str):
+    """
+    Configura el logging para el módulo indicado, usando RotatingFileHandler y StreamHandler.
+    """
     logger = logging.getLogger(nombre_modulo)
     if logger.handlers:
-        return
+        return  # Evita reconfigurar si ya existe
 
     logger.setLevel(logging.INFO)
     formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
@@ -36,11 +39,20 @@ def configurar_logging(nombre_modulo: str):
 
 # === VALIDADORES ===
 def es_url_valida(url: str) -> bool:
+    """
+    Verifica si la URL tiene un scheme y un netloc válidos.
+    Por ejemplo: https://<tu_proyecto>.supabase.co
+    """
     parsed = urlparse(url)
     return all([parsed.scheme, parsed.netloc])
 
 def es_clave_valida(clave: str) -> bool:
-    return re.match(r"^[A-Za-z0-9_-]{32,}$", clave) is not None
+    """
+    Valida la clave de Supabase de manera más flexible.
+    Muchas claves de Supabase son largas y pueden contener caracteres adicionales.
+    Aquí se verifica que exista y tenga al menos 30 caracteres.
+    """
+    return bool(clave and len(clave) > 30)
 
 # === CONFIGURAR LOGGING PARA ESTE SCRIPT ===
 configurar_logging("conexion")
@@ -49,6 +61,7 @@ logger = logging.getLogger("conexion")
 # === CARGAR VARIABLES DE ENTORNO CONDICIONALMENTE ===
 ENTORNO = os.getenv("ENTORNO", "desarrollo")
 if ENTORNO.lower() in ["dev", "desarrollo"]:
+    # Si existe un archivo .env local, lo cargamos (para entornos de desarrollo).
     if os.path.exists(".env"):
         load_dotenv()
     else:
@@ -67,11 +80,16 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 @CONNECTION_LATENCY.time()  # Métrica de latencia
 @circuit(failure_threshold=3, recovery_timeout=30)
 def conectar_supabase(url: str = SUPABASE_URL, key: str = SUPABASE_KEY) -> Client:
+    """
+    Crea un cliente de Supabase con manejo de errores HTTP, backoff y circuit breaker.
+    Verifica también la validez de la URL y la clave antes de conectar.
+    """
     if not url or not key:
         logger.error("❌ Faltan las variables SUPABASE_URL o SUPABASE_KEY")
         CONNECTION_STATUS.set(0)
         raise EnvironmentError("Variables faltantes.")
 
+    # Validaciones
     if not es_url_valida(url) or not es_clave_valida(key):
         logger.error("❌ Formato inválido en SUPABASE_URL o SUPABASE_KEY")
         CONNECTION_STATUS.set(0)
@@ -96,14 +114,14 @@ def conectar_supabase(url: str = SUPABASE_URL, key: str = SUPABASE_KEY) -> Clien
 
 # === PRUEBA DE CONEXIÓN CON TABLA DE SISTEMA ===
 def probar_conexion(supabase: Client):
+    """
+    Realiza una consulta de prueba para verificar que la conexión a Supabase
+    funcione correctamente. En este ejemplo, se consulta la tabla interna 'pg_tables'.
+    """
     try:
         response = supabase.table("pg_tables").select("schemaname").limit(1).execute()
         logger.info("✅ Consulta de prueba a pg_tables exitosa.")
         return True
-
-    except ClientResponseError as e:
-        logger.error(f"❌ Error Supabase: {e}")
-        raise
 
     except Exception as e:
         logger.error(f"❌ Error al consultar tabla de sistema: {e}")
