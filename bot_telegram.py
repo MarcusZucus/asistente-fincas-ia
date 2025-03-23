@@ -16,6 +16,8 @@ from logging.handlers import RotatingFileHandler
 # === CARGAR VARIABLES DE ENTORNO ===
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://asistente-fincas-ia-production.up.railway.app")
+PORT = int(os.getenv("PORT", 8443))  # Railway suele definir el puerto en la variable PORT
 
 # === VALIDAR TOKEN ===
 if not TELEGRAM_TOKEN or len(TELEGRAM_TOKEN) < 30:
@@ -41,7 +43,9 @@ logger = logging.getLogger("bot_telegram")
 
 # === COMANDO /start ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 ¡Bienvenido! Soy tu asistente de administración de fincas.\n\nEjemplo: ¿Cómo puedo contactar al portero?")
+    await update.message.reply_text(
+        "👋 ¡Bienvenido! Soy tu asistente de administración de fincas.\n\nEjemplo: ¿Cómo puedo contactar al portero?"
+    )
 
 # === MANEJAR MENSAJES ===
 async def manejar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -78,8 +82,15 @@ def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensaje))
-    logger.info("🤖 Bot de Telegram iniciado correctamente.")
-    app.run_polling()
+    logger.info("🤖 Bot de Telegram iniciado correctamente con Webhooks.")
+
+    # Configura y activa el webhook
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=TELEGRAM_TOKEN,  # Usamos el token como path para mayor seguridad
+        webhook_url=f"{WEBHOOK_URL}/{TELEGRAM_TOKEN}"
+    )
 
 if __name__ == "__main__":
     main()
