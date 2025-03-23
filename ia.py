@@ -9,7 +9,7 @@ from typing import List
 from datetime import datetime
 from dotenv import load_dotenv
 import openai
-from openai import OpenAIError  # para capturar errores de OpenAI
+from openai import OpenAIError  # Para capturar errores de OpenAI
 from httpx import HTTPError
 from logging.handlers import RotatingFileHandler
 from prometheus_client import Histogram, start_http_server
@@ -18,8 +18,8 @@ from circuitbreaker import circuit
 
 # === CONFIGURACIÓN GENERAL ===
 TABLA_EMBEDDINGS = os.getenv("TABLA_EMBEDDINGS", "documentos_embeddings")
-# Se usará el modelo de OpenAI para vectorización, por lo que definimos:
-OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-ada-002")
+# Usamos el modelo de OpenAI para que tanto la indexación como la consulta generen vectores de 1536 dimensiones.
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-ada-002")
 TOP_K = int(os.getenv("TOP_K", 3))
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "TU_API_KEY")
 
@@ -51,22 +51,31 @@ load_dotenv()
 os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 openai.api_key = OPENAI_API_KEY
 
+# === VECTORIZACIÓN DE PREGUNTA CON OPENAI ===
+def vectorizar_pregunta(pregunta: str) -> List[float]:
+    """
+    Genera el embedding de la pregunta utilizando la API de OpenAI.
+    Se espera que se genere un vector de 1536 dimensiones (modelo text-embedding-ada-002).
+    """
+    try:
+        response = openai.Embedding.create(
+            input=[pregunta],
+            model=EMBEDDING_MODEL
+        )
+        embedding = response["data"][0]["embedding"]
+        return embedding
+    except Exception as e:
+        logger.error(f"❌ Error vectorizando pregunta: {e}")
+        raise
+
 # === SANITIZACIÓN DE PREGUNTA ===
 def sanitizar_pregunta(pregunta: str, max_length=500) -> str:
-    # Se eliminan caracteres no alfanuméricos (permitiendo acentos, ñ y signos de interrogación)
+    """
+    Limpia la pregunta eliminando caracteres no alfanuméricos,
+    permitiendo acentos, ñ y signos de interrogación.
+    """
     pregunta = re.sub(r'[^\w\sáéíóúñ¿?]', '', pregunta.strip())
     return pregunta[:max_length]
-
-# === VECTORIZACIÓN DE PREGUNTA (con OpenAI) ===
-def vectorizar_pregunta(pregunta: str) -> List[float]:
-    try:
-        # Usamos la API de OpenAI para generar el embedding de la pregunta
-        response = openai.Embedding.create(input=[pregunta], model=OPENAI_EMBEDDING_MODEL)
-        vector = response["data"][0]["embedding"]
-        return vector
-    except Exception as e:
-        logger.error(f"❌ Error vectorizando pregunta con OpenAI: {e}")
-        raise
 
 # === SIMILITUD COSENO ===
 def similitud_coseno(v1: List[float], v2: List[float]) -> float:
@@ -91,9 +100,8 @@ def truncar_contexto(contexto: str, max_palabras: int = 1500) -> str:
 def obtener_contexto_relevante(pregunta: str, supabase, k=TOP_K) -> str:
     try:
         logger.info("🔍 Recuperando contexto relevante...")
-        # Vectorizamos la pregunta usando OpenAI
         pregunta_vector = vectorizar_pregunta(pregunta)
-        # Se asume que el RPC 'vector_search' existe y retorna documentos con el campo 'embedding' y 'contenido'
+        # Se asume que la función RPC 'vector_search' de Supabase utiliza el campo 'embedding'
         response = supabase.rpc('vector_search', {
             'query_embedding': pregunta_vector,
             'match_count': k * 2
@@ -105,6 +113,7 @@ def obtener_contexto_relevante(pregunta: str, supabase, k=TOP_K) -> str:
 
         resultados = []
         for doc in response.data:
+            # Se espera que el vector esté en el campo 'embedding'
             embedding = doc.get("embedding")
             if isinstance(embedding, list) and embedding:
                 score = similitud_coseno(pregunta_vector, embedding)
@@ -119,7 +128,7 @@ def obtener_contexto_relevante(pregunta: str, supabase, k=TOP_K) -> str:
         logger.error(f"❌ Error al recuperar contexto: {e}")
         raise
 
-# === GPT (con Prometheus y circuit breaker) ===
+# === RESPUESTA CON GPT (con Prometheus y circuit breaker) ===
 @circuit(failure_threshold=3, recovery_timeout=60)
 @GPT_RESPONSE_LATENCY.time()
 def responder_con_gpt(pregunta: str, contexto: str) -> str:

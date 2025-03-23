@@ -17,7 +17,7 @@ from prometheus_client import Counter, Summary, Histogram, start_http_server
 from tenacity import retry, stop_after_attempt, RetryError
 
 # === CONFIGURACIÓN GENERAL ===
-# Usamos "text-embedding-ada-002" por defecto (económico y recomendado).
+# Se utiliza "text-embedding-ada-002" por defecto (económico y recomendado).
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-ada-002")
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", 500))
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", 2048))
@@ -365,7 +365,7 @@ if __name__ == "__main__":
         for i in range(len(embeddings)):
             item = {
                 **datos_validos[i],
-                # Usamos "embedding" en lugar de "embedding_vector"
+                # Se usa "embedding" en lugar de "embedding_vector"
                 "embedding": embeddings[i],
                 "vectorizado_en": datetime.utcnow().isoformat()
             }
