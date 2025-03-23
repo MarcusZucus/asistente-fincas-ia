@@ -24,22 +24,20 @@ from prometheus_client import Counter, Summary, Histogram, start_http_server
 from tenacity import retry, stop_after_attempt, RetryError
 
 # === CONFIGURACIÓN GENERAL ===
-# Se utiliza "text-embedding-ada-002" por defecto (económico y recomendado).
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-ada-002")
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", 500))
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", 2048))
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", 3))
 
-# Tablas de donde extraer datos (solo se usan las que tienes)
+# Tablas de donde extraer datos
 TABLA_ADMINISTRACIONES = "administraciones"
 TABLA_FINCAS = "fincas"
 TABLA_USUARIOS = "usuarios"
 TABLA_INCIDENCIAS = "incidencias"
-
-# Tabla destino para embeddings (configurable mediante variable de entorno)
+# Tabla destino para embeddings (configurable)
 TABLA_DESTINO = os.getenv("TABLA_DESTINO", "documentos_embeddings")
 
-# === CONFIGURAR LOGGING ROTATIVO (sin emojis) ===
+# === CONFIGURAR LOGGING ROTATIVO (con feedback inmediato estilo primer script) ===
 def configurar_logging(nombre_modulo: str):
     """
     Configura logging con RotatingFileHandler y StreamHandler usando UTF-8.
@@ -50,7 +48,7 @@ def configurar_logging(nombre_modulo: str):
     logger.setLevel(logging.DEBUG)
     formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
     log_filename = f"{nombre_modulo}.log"
-    file_handler = RotatingFileHandler(log_filename, maxBytes=5*1024*1024, backupCount=3)
+    file_handler = RotatingFileHandler(log_filename, maxBytes=5 * 1024 * 1024, backupCount=3)
     file_handler.setFormatter(formatter)
     stream_handler = logging.StreamHandler(sys.stdout)
     stream_handler.setFormatter(formatter)
@@ -78,7 +76,6 @@ logger.info(f"USANDO MODELO OPENAI EMBEDDINGS: {EMBEDDING_MODEL}")
 logger.debug("Variables de entorno cargadas correctamente.")
 
 # === FUNCIONES DE CARGA DE DATOS ===
-
 def cargar_administraciones(supabase) -> List[Dict]:
     """
     Carga y transforma datos desde la tabla 'administraciones'.
@@ -93,7 +90,7 @@ def cargar_administraciones(supabase) -> List[Dict]:
             DOCUMENTOS_INVALIDOS.inc()
             continue
         texto = (f"La administración '{a['nombre']}' está en {a['direccion']}, "
-                 f"teléfono {a['telefono']}, email {a['email']}.")
+                 f"teléfono: {a['telefono']}, email: {a['email']}.")
         result.append({"id": a["id"], "contenido": texto})
     return result
 
@@ -184,14 +181,19 @@ def generar_embeddings(textos: List[str], modelo=EMBEDDING_MODEL) -> List[List[f
         logger.error(f"Error generando embeddings con OpenAI: {e}")
         raise
 
-# === GUARDADO SEGURO DE EMBEDDINGS POR LOTES ===
+# === GUARDADO SEGURO DE EMBEDDINGS POR LOTES CON FEEDBACK INMEDIATO ===
 @retry(stop=stop_after_attempt(MAX_RETRIES))
 def guardar_batch(supabase, tabla, batch):
     """
     Inserta un batch de registros en la tabla de Supabase.
+    Tras la inserción exitosa, se registra individualmente el feedback similar al primer script.
     """
     logger.debug(f"Guardando batch en la tabla {tabla}: {batch}")
     supabase.table(tabla).insert(batch).execute()
+    # Luego de insertar, se da feedback inmediato por cada registro
+    for registro in batch:
+        contenido = registro.get("contenido", "")[:60]
+        logger.info(f"✅ Insertado embedding: {contenido}...")
     logger.debug("Batch guardado correctamente.")
 
 def guardar_embeddings(supabase, tabla: str, datos: List[dict], batch_size=BATCH_SIZE):
@@ -211,7 +213,7 @@ def guardar_embeddings(supabase, tabla: str, datos: List[dict], batch_size=BATCH
                 json.dump(batch, f)
                 f.write("\n")
 
-# === CONEXIÓN SUPABASE (Circuit Breaker / Backoff) ===
+# === CONEXIÓN A SUPABASE CON CIRCUIT BREAKER / BACKOFF ===
 @on_exception(expo, Exception, max_tries=3)
 @circuit(failure_threshold=3, recovery_timeout=30)
 def conectar_supabase():
@@ -290,7 +292,7 @@ if __name__ == "__main__":
         # 4. Generar embeddings
         embeddings = generar_embeddings(textos)
         
-        # 5. Combinar datos + embeddings y guardar
+        # 5. Combinar datos + embeddings y preparar para guardar
         datos_con_embeddings = []
         for i in range(len(embeddings)):
             item = {
