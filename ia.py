@@ -164,8 +164,7 @@ def responder_con_gpt(pregunta: str, contexto: str) -> str:
     """
     try:
         system_prompt = (
-            "Eres un asistente de administración de fincas. Responde solo en base a la información del contexto. "
-            "Si no encuentras respuesta, indica amablemente que no tienes información."
+            "Eres un asistente experto en administración de fincas. Tu función es responder únicamente basándote en la información del contexto que te provea, sin inventar datos. Si la información del contexto no es suficiente, indica amablemente que no tienes información. Ten en cuenta que el usuario que consulta se llama {nombre} y tiene el rol de {rol}. Responde de forma clara, precisa y personalizada acorde a su perfil."
         )
         messages = [
             {"role": "system", "content": system_prompt},
