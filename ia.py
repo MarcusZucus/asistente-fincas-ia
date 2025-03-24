@@ -55,7 +55,7 @@ openai.api_key = OPENAI_API_KEY
 def vectorizar_pregunta(pregunta: str) -> List[float]:
     """
     Genera el embedding de la pregunta utilizando la API de OpenAI.
-    Se espera que se genere un vector de 1536 dimensiones (modelo text-embedding-ada-002).
+    Se espera un vector de 1536 dimensiones (modelo text-embedding-ada-002).
     """
     try:
         response = openai.Embedding.create(
@@ -79,6 +79,9 @@ def sanitizar_pregunta(pregunta: str, max_length=500) -> str:
 
 # === SIMILITUD COSENO ===
 def similitud_coseno(v1: List[float], v2: List[float]) -> float:
+    """
+    Calcula la similitud coseno entre dos vectores (listas de floats).
+    """
     v1 = np.array(v1)
     v2 = np.array(v2)
     norm_v1 = np.linalg.norm(v1)
@@ -89,6 +92,10 @@ def similitud_coseno(v1: List[float], v2: List[float]) -> float:
 
 # === TRUNCAR CONTEXTO ===
 def truncar_contexto(contexto: str, max_palabras: int = 1500) -> str:
+    """
+    Limita el contexto a un número máximo de palabras
+    para evitar entradas excesivas a ChatGPT.
+    """
     palabras = contexto.split()
     if len(palabras) > max_palabras:
         logger.warning("⚠️ Contexto truncado por exceso de longitud.")
@@ -99,17 +106,22 @@ def truncar_contexto(contexto: str, max_palabras: int = 1500) -> str:
 # === BÚSQUEDA DE CONTEXTO CON RPC VECTORIAL ===
 def obtener_contexto_relevante(pregunta: str, supabase, k=TOP_K) -> str:
     """
-    Se llama a la función RPC 'vector_search' en Supabase, que debe
-    devolver registros con el campo 'embedding_vector'.
+    Llama a la función RPC 'vector_search' en Supabase, 
+    la cual debe devolver registros con los campos 'contenido' y 'embedding_vector'.
+    Luego, ordena localmente los resultados por similitud coseno, si hace falta.
     """
     try:
         logger.info("🔍 Recuperando contexto relevante...")
         pregunta_vector = vectorizar_pregunta(pregunta)
-        # Ajustar la función RPC y sus parámetros según tu implementación en Supabase
+
+        # Llamada a la función RPC con la query
         response = supabase.rpc('vector_search', {
             'query_embedding': pregunta_vector,
-            'match_count': k * 2
+            'match_count': k * 2  # recuperamos 2k y luego filtramos
         }).execute()
+
+        # Log para depurar la respuesta cruda
+        logger.debug(f"RPC vector_search response: {response.data}")
 
         if not response.data:
             logger.warning("⚠️ No se encontraron documentos relevantes.")
@@ -117,17 +129,28 @@ def obtener_contexto_relevante(pregunta: str, supabase, k=TOP_K) -> str:
 
         resultados = []
         for doc in response.data:
-            # Ajustar el campo según la columna real donde se guarde el embedding
+            # Se asume que la columna de embeddings se llama "embedding_vector"
             embedding = doc.get("embedding_vector")
+            contenido = doc.get("contenido", "")
             if isinstance(embedding, list) and embedding:
                 score = similitud_coseno(pregunta_vector, embedding)
                 SIMILITUD_SCORE.observe(score)
-                resultados.append((score, doc))
+                resultados.append((score, contenido))
+            else:
+                logger.debug(f"Documento sin embedding válido: {doc}")
 
+        if not resultados:
+            logger.warning("⚠️ Ningún documento contenía embedding válido.")
+            return ""
+
+        # Ordenamos localmente por score descendente
         resultados.sort(key=lambda x: x[0], reverse=True)
-        top_k_docs = [doc["contenido"] for _, doc in resultados[:k]]
+        # Seleccionamos top_k en base al score
+        top_k_docs = [doc_text for _, doc_text in resultados[:k]]
+
         logger.info(f"📚 Top-{k} documentos seleccionados como contexto.")
         return truncar_contexto("\n\n".join(top_k_docs))
+
     except Exception as e:
         logger.error(f"❌ Error al recuperar contexto: {e}")
         raise
@@ -164,15 +187,16 @@ _respuestas_cache = {}
 
 def responder_pregunta(pregunta: str, user_id: str = None) -> str:
     """
-    Función principal que orquesta la obtención del contexto relevante y la generación de respuesta.
+    Función principal que orquesta la obtención del contexto relevante y la generación de la respuesta final.
     """
     session_id = str(uuid.uuid4())[:8]
     pregunta = sanitizar_pregunta(pregunta)
     if not pregunta:
         return "Por favor, formula una pregunta válida."
 
-    logger.info(f"🆔 Sesión: {session_id} {'(Usuario: ' + user_id + ')' if user_id else ''}")
+    logger.info(f"🆔 Sesión: {session_id} (Usuario: {user_id})" if user_id else f"🆔 Sesión: {session_id}")
 
+    # Revisar la caché local para evitar recalcular
     if pregunta in _respuestas_cache:
         logger.info(f"⚡ [{session_id}] Respuesta recuperada de caché.")
         return _respuestas_cache[pregunta]

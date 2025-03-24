@@ -297,7 +297,7 @@ if __name__ == "__main__":
         for i in range(len(embeddings)):
             item = {
                 **datos_validos[i],
-                "embedding": embeddings[i],
+                "embedding_vector": embeddings[i],
                 "vectorizado_en": datetime.utcnow().isoformat()
             }
             # Para asignar un nuevo UUID a cada registro, descomenta la siguiente línea:
