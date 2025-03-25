@@ -6,6 +6,10 @@ try:
 except Exception:
     pass
 
+# === CARGAR VARIABLES DE ENTORNO TEMPRANO ===
+from dotenv import load_dotenv
+load_dotenv()  # Se carga de inmediato para que todas las variables estén disponibles
+
 import logging
 import os
 import re
@@ -13,7 +17,6 @@ import json
 import uuid
 from datetime import datetime
 from urllib.parse import urlparse
-from dotenv import load_dotenv
 import openai  # Asegúrate de usar openai==0.28 para compatibilidad con openai.Embedding.create
 from supabase import create_client
 from typing import List, Dict
@@ -37,18 +40,30 @@ TABLA_INCIDENCIAS = "incidencias"
 # Tabla destino para embeddings (configurable)
 TABLA_DESTINO = os.getenv("TABLA_DESTINO", "documentos_embeddings")
 
-# === CONFIGURAR LOGGING ROTATIVO (con feedback inmediato estilo primer script) ===
+# Variables críticas (se verifica que existan)
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY or not OPENAI_API_KEY:
+    raise EnvironmentError("Faltan variables de entorno críticas: SUPABASE_URL, SUPABASE_KEY o OPENAI_API_KEY")
+
+openai.api_key = OPENAI_API_KEY
+
+# === CONFIGURAR LOGGING ROTATIVO CON OPCIÓN DE DEBUG ===
 def configurar_logging(nombre_modulo: str):
     """
     Configura logging con RotatingFileHandler y StreamHandler usando UTF-8.
+    Permite activar un modo de debug mediante la variable DEBUG_MODE.
     """
     logger = logging.getLogger(nombre_modulo)
     if logger.handlers:
         return
-    logger.setLevel(logging.DEBUG)
+    debug_mode = os.getenv("DEBUG_MODE", "False").lower() == "true"
+    logger.setLevel(logging.DEBUG if debug_mode else logging.INFO)
     formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
     log_filename = f"{nombre_modulo}.log"
-    file_handler = RotatingFileHandler(log_filename, maxBytes=5 * 1024 * 1024, backupCount=3)
+    file_handler = RotatingFileHandler(log_filename, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
     file_handler.setFormatter(formatter)
     stream_handler = logging.StreamHandler(sys.stdout)
     stream_handler.setFormatter(formatter)
@@ -63,13 +78,6 @@ EMBEDDING_COUNTER = Counter('embeddings_generados', 'Total de embeddings generad
 PROCESS_TIME = Summary('embeddings_process_time', 'Tiempo total de procesamiento de embeddings')
 DOCUMENTOS_INVALIDOS = Counter('documentos_invalidos', 'Registros omitidos por ser inválidos')
 LATENCIA_SUPABASE = Histogram('latencia_supabase', 'Tiempo de respuesta en consultas Supabase')
-
-# === CARGAR VARIABLES DE ENTORNO ===
-load_dotenv()
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-openai.api_key = OPENAI_API_KEY
 
 logger.info(f"USANDO CLAVE SUPABASE: {SUPABASE_KEY[:2]}...{SUPABASE_KEY[-2:]}")
 logger.info(f"USANDO MODELO OPENAI EMBEDDINGS: {EMBEDDING_MODEL}")
@@ -91,30 +99,34 @@ def cargar_administraciones(supabase) -> List[Dict]:
             continue
         texto = (f"La administración '{a['nombre']}' está en {a['direccion']}, "
                  f"teléfono: {a['telefono']}, email: {a['email']}.")
-        result.append({"id": a["id"], "contenido": texto})
+        # Se añade un origen y tipo_documento para trazabilidad
+        result.append({"id": a["id"], "contenido": texto, "origen": "administraciones", "tipo_documento": "administracion"})
     return result
 
 def cargar_fincas(supabase) -> List[Dict]:
     """
     Carga y transforma datos desde la tabla 'fincas'.
+    Se adaptan los nombres de columnas al DDL real.
     """
     rows = supabase.table(TABLA_FINCAS).select("*").execute().data
     logger.info(f"(fincas) Cargados {len(rows)} registros.")
     result = []
     for i, f in enumerate(rows):
         logger.debug(f"Procesando finca registro {i}: {f}")
-        if not all(k in f for k in ("id", "nombre", "direccion", "numero_puertas", "administracion_id")):
+        # Se usan nombres de columna según el DDL: nombre_finca, direccion_finca, numero_puertas_finca
+        if not all(k in f for k in ("id", "nombre_finca", "direccion_finca", "numero_puertas_finca", "administracion_id")):
             logger.warning(f"Faltan columnas en fincas (registro {i}).")
             DOCUMENTOS_INVALIDOS.inc()
             continue
-        texto = (f"La finca '{f['nombre']}' está ubicada en {f['direccion']}, "
-                 f"tiene {f['numero_puertas']} puertas y pertenece a la administración con ID {f['administracion_id']}.")
-        result.append({"id": f["id"], "contenido": texto})
+        texto = (f"La finca '{f['nombre_finca']}' está ubicada en {f['direccion_finca']}, "
+                 f"tiene {f['numero_puertas_finca']} puertas y pertenece a la administración con ID {f['administracion_id']}.")
+        result.append({"id": f["id"], "contenido": texto, "origen": "fincas", "tipo_documento": "finca"})
     return result
 
 def cargar_usuarios(supabase) -> List[Dict]:
     """
     Carga y transforma datos desde la tabla 'usuarios'.
+    Se asume que los campos corresponden a: id, nombre, rol, nombre_fincas, direccion_finca, telefono_movil.
     """
     rows = supabase.table(TABLA_USUARIOS).select("*").execute().data
     logger.info(f"(usuarios) Cargados {len(rows)} registros.")
@@ -127,7 +139,7 @@ def cargar_usuarios(supabase) -> List[Dict]:
             continue
         texto = (f"El usuario '{u['nombre']}' es {u['rol']} en la finca '{u['nombre_fincas']}' "
                  f"(dirección: {u['direccion_finca']}), teléfono: {u['telefono_movil']}.")
-        result.append({"id": u["id"], "contenido": texto})
+        result.append({"id": u["id"], "contenido": texto, "origen": "usuarios", "tipo_documento": "usuario"})
     return result
 
 def cargar_incidencias(supabase) -> List[Dict]:
@@ -146,7 +158,7 @@ def cargar_incidencias(supabase) -> List[Dict]:
         texto = (f"Incidencia tipo '{inc['tipo']}' con urgencia '{inc['urgencia']}' en finca ID {inc['finca_id']}, "
                  f"reportada por usuario ID {inc['usuario_id']}. Teléfono: {inc['telefono_movil']}. "
                  f"Descripción: {inc['descripcion']}.")
-        result.append({"id": inc["id"], "contenido": texto})
+        result.append({"id": inc["id"], "contenido": texto, "origen": "incidencias", "tipo_documento": "incidencia"})
     return result
 
 # === PREPROCESAMIENTO DE TEXTO ===
@@ -163,17 +175,24 @@ def preprocesar_texto(texto: str) -> str:
     logger.debug(f"Texto preprocesado: {texto}")
     return texto
 
-# === GENERAR EMBEDDINGS CON OPENAI ===
+# === GENERAR EMBEDDINGS CON OPENAI (con reintentos) ===
+@retry(stop=stop_after_attempt(MAX_RETRIES))
 @PROCESS_TIME.time()
 def generar_embeddings(textos: List[str], modelo=EMBEDDING_MODEL) -> List[List[float]]:
     """
     Llama a la API de OpenAI para generar embeddings en batch.
+    Se implementa retry para manejar fallos temporales.
     """
     logger.debug(f"Iniciando generación de embeddings para {len(textos)} textos.")
     try:
         response = openai.Embedding.create(input=textos, model=modelo)
         logger.debug(f"Respuesta de OpenAI: {response}")
         embeddings = [item["embedding"] for item in response["data"]]
+        # Validar dimensión de cada embedding
+        for idx, emb in enumerate(embeddings):
+            if len(emb) != 1536:
+                logger.error(f"Embedding en posición {idx} tiene dimensión inesperada: {len(emb)}")
+                raise ValueError("Dimensión de embedding incorrecta")
         EMBEDDING_COUNTER.inc(len(embeddings))
         logger.info(f"Generados {len(embeddings)} embeddings con OpenAI.")
         return embeddings
@@ -186,11 +205,10 @@ def generar_embeddings(textos: List[str], modelo=EMBEDDING_MODEL) -> List[List[f
 def guardar_batch(supabase, tabla, batch):
     """
     Inserta un batch de registros en la tabla de Supabase.
-    Tras la inserción exitosa, se registra individualmente el feedback similar al primer script.
+    Tras la inserción exitosa, se registra individualmente el feedback.
     """
     logger.debug(f"Guardando batch en la tabla {tabla}: {batch}")
-    supabase.table(tabla).insert(batch).execute()
-    # Luego de insertar, se da feedback inmediato por cada registro
+    result = supabase.table(tabla).insert(batch).execute()
     for registro in batch:
         contenido = registro.get("contenido", "")[:60]
         logger.info(f"✅ Insertado embedding: {contenido}...")
@@ -213,18 +231,14 @@ def guardar_embeddings(supabase, tabla: str, datos: List[dict], batch_size=BATCH
                 json.dump(batch, f)
                 f.write("\n")
 
-# === CONEXIÓN A SUPABASE CON CIRCUIT BREAKER / BACKOFF ===
+# === CONEXIÓN A SUPABASE CON CIRCUIT BREAKER Y BACKOFF ===
 @on_exception(expo, Exception, max_tries=3)
 @circuit(failure_threshold=3, recovery_timeout=30)
 def conectar_supabase():
     """
-    Crea un cliente de Supabase con manejo de errores.
+    Crea un cliente de Supabase con manejo de errores y valida la conexión realizando una consulta simple.
     """
     logger.debug("Intentando conectar a Supabase...")
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        logger.error("Faltan SUPABASE_URL o SUPABASE_KEY")
-        raise EnvironmentError("Variables faltantes para Supabase.")
-    
     parsed = urlparse(SUPABASE_URL)
     if not parsed.scheme or not parsed.netloc:
         logger.error("Formato inválido en SUPABASE_URL")
@@ -236,13 +250,17 @@ def conectar_supabase():
     
     logger.info(f"Conectando a Supabase: {SUPABASE_URL}")
     client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    logger.debug("Conexión a Supabase establecida.")
+    test_result = client.table(TABLA_ADMINISTRACIONES).select("id").limit(1).execute()
+    if not test_result.data:
+        logger.error("La conexión se estableció pero no se pudo obtener respuesta de Supabase.")
+        raise ConnectionError("Error validando conexión a Supabase.")
+    logger.debug("Conexión a Supabase establecida y validada.")
     return client
 
 # === EJECUCIÓN DIRECTA ===
 if __name__ == "__main__":
     try:
-        # Iniciar servidor Prometheus para métricas en el puerto 8000
+        # Iniciar servidor Prometheus para métricas en el puerto 8000 (parametrizable si se desea)
         start_http_server(8000)
         logger.info("Servidor Prometheus iniciado en el puerto 8000.")
         
@@ -295,14 +313,15 @@ if __name__ == "__main__":
         # 5. Combinar datos + embeddings y preparar para guardar
         datos_con_embeddings = []
         for i in range(len(embeddings)):
-            item = {
+            # Se puede generar un nuevo UUID para la tabla destino si se desea:
+            registro = {
                 **datos_validos[i],
                 "embedding_vector": embeddings[i],
                 "vectorizado_en": datetime.utcnow().isoformat()
             }
-            # Para asignar un nuevo UUID a cada registro, descomenta la siguiente línea:
-            # item["id"] = str(uuid.uuid4())
-            datos_con_embeddings.append(item)
+            # Descomentar la siguiente línea si se requiere asignar un nuevo UUID y guardar el original en otro campo
+            # registro["id"] = str(uuid.uuid4())
+            datos_con_embeddings.append(registro)
         
         logger.debug(f"Datos con embeddings preparados: {datos_con_embeddings[:2]}... (mostrando 2 de {len(datos_con_embeddings)})")
         
