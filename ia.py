@@ -1,4 +1,3 @@
-# === IMPORTS ===
 import logging
 import os
 import re
@@ -16,14 +15,18 @@ from prometheus_client import Histogram, start_http_server
 from conexion import conectar_supabase
 from circuitbreaker import circuit
 
-# === CONFIGURACIÓN GENERAL ===
+# =============================================================================
+# CONFIGURACIÓN GENERAL
+# =============================================================================
 TABLA_EMBEDDINGS = os.getenv("TABLA_EMBEDDINGS", "documentos_embeddings")
-# Usamos el modelo de OpenAI para que tanto la indexación como la consulta generen vectores de 1536 dimensiones.
+# Se usa el modelo text-embedding-ada-002 para indexar y consultar embeddings de 1536 dimensiones.
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-ada-002")
 TOP_K = int(os.getenv("TOP_K", 3))
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "TU_API_KEY")
 
-# === CONFIGURAR LOGGING ===
+# =============================================================================
+# CONFIGURAR LOGGING
+# =============================================================================
 def configurar_logging(nombre_modulo: str):
     logger = logging.getLogger(nombre_modulo)
     if logger.handlers:
@@ -31,7 +34,7 @@ def configurar_logging(nombre_modulo: str):
     logger.setLevel(logging.INFO)
     formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
     log_filename = f"{nombre_modulo}.log"
-    file_handler = RotatingFileHandler(log_filename, maxBytes=5*1024*1024, backupCount=3)
+    file_handler = RotatingFileHandler(log_filename, maxBytes=5 * 1024 * 1024, backupCount=3)
     file_handler.setFormatter(formatter)
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(formatter)
@@ -41,17 +44,23 @@ def configurar_logging(nombre_modulo: str):
 configurar_logging("ia")
 logger = logging.getLogger("ia")
 
-# === MÉTRICAS PROMETHEUS ===
+# =============================================================================
+# MÉTRICAS PROMETHEUS
+# =============================================================================
 GPT_RESPONSE_LATENCY = Histogram('gpt_response_latency_seconds', 'Tiempo de respuesta del modelo de IA')
 SIMILITUD_SCORE = Histogram('similitud_score', 'Puntajes de similitud')
 CONTEXTO_LENGTH = Histogram('contexto_length', 'Longitud del contexto en palabras')
 
-# === CARGAR VARIABLES DE ENTORNO ===
+# =============================================================================
+# CONFIGURAR VARIABLES DE ENTORNO Y OPENAI
+# =============================================================================
 load_dotenv()
 os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 openai.api_key = OPENAI_API_KEY
 
-# === VECTORIZACIÓN DE PREGUNTA CON OPENAI ===
+# =============================================================================
+# VECTORIZACIÓN DE PREGUNTA CON OPENAI
+# =============================================================================
 def vectorizar_pregunta(pregunta: str) -> List[float]:
     """
     Genera el embedding de la pregunta utilizando la API de OpenAI.
@@ -65,10 +74,12 @@ def vectorizar_pregunta(pregunta: str) -> List[float]:
         embedding = response["data"][0]["embedding"]
         return embedding
     except Exception as e:
-        logger.error(f"❌ Error vectorizando pregunta: {e}")
+        logger.error(f"Error vectorizando pregunta: {e}")
         raise
 
-# === SANITIZACIÓN DE PREGUNTA ===
+# =============================================================================
+# SANITIZACIÓN DE PREGUNTA
+# =============================================================================
 def sanitizar_pregunta(pregunta: str, max_length=500) -> str:
     """
     Limpia la pregunta eliminando caracteres no alfanuméricos,
@@ -77,7 +88,9 @@ def sanitizar_pregunta(pregunta: str, max_length=500) -> str:
     pregunta = re.sub(r'[^\w\sáéíóúñ¿?]', '', pregunta.strip())
     return pregunta[:max_length]
 
-# === SIMILITUD COSENO ===
+# =============================================================================
+# CÁLCULO DE SIMILITUD COSENO
+# =============================================================================
 def similitud_coseno(v1: List[float], v2: List[float]) -> float:
     """
     Calcula la similitud coseno entre dos vectores (listas de floats).
@@ -90,7 +103,9 @@ def similitud_coseno(v1: List[float], v2: List[float]) -> float:
         return 0.0
     return np.dot(v1, v2) / (norm_v1 * norm_v2)
 
-# === TRUNCAR CONTEXTO ===
+# =============================================================================
+# TRUNCAR CONTEXTO
+# =============================================================================
 def truncar_contexto(contexto: str, max_palabras: int = 1500) -> str:
     """
     Limita el contexto a un número máximo de palabras
@@ -98,38 +113,38 @@ def truncar_contexto(contexto: str, max_palabras: int = 1500) -> str:
     """
     palabras = contexto.split()
     if len(palabras) > max_palabras:
-        logger.warning("⚠️ Contexto truncado por exceso de longitud.")
+        logger.warning("Contexto truncado por exceso de longitud.")
         return " ".join(palabras[:max_palabras])
     CONTEXTO_LENGTH.observe(len(palabras))
     return contexto
 
-# === BÚSQUEDA DE CONTEXTO CON RPC VECTORIAL ===
+# =============================================================================
+# BÚSQUEDA DE CONTEXTO CON RPC VECTORIAL
+# =============================================================================
 def obtener_contexto_relevante(pregunta: str, supabase, k=TOP_K) -> str:
     """
     Llama a la función RPC 'vector_search' en Supabase, 
-    la cual debe devolver registros con los campos 'contenido' y 'embedding_vector'.
-    Luego, ordena localmente los resultados por similitud coseno, si hace falta.
+    que debe devolver registros con los campos 'contenido' y 'embedding_vector'.
+    Ordena localmente los resultados por similitud coseno y devuelve el contexto concatenado.
     """
     try:
-        logger.info("🔍 Recuperando contexto relevante...")
+        logger.info("Recuperando contexto relevante...")
         pregunta_vector = vectorizar_pregunta(pregunta)
 
         # Llamada a la función RPC con la query
         response = supabase.rpc('vector_search', {
             'query_embedding': pregunta_vector,
-            'match_count': k * 2  # recuperamos 2k y luego filtramos
+            'match_count': k * 2  # recuperamos 2k para filtrar posteriormente
         }).execute()
 
-        # Log para depurar la respuesta cruda
-        logger.debug(f"RPC vector_search response: {response.data}")
+        logger.debug(f"Respuesta RPC vector_search: {response.data}")
 
         if not response.data:
-            logger.warning("⚠️ No se encontraron documentos relevantes.")
+            logger.warning("No se encontraron documentos relevantes.")
             return ""
 
         resultados = []
         for doc in response.data:
-            # Se asume que la columna de embeddings se llama "embedding_vector"
             embedding = doc.get("embedding_vector")
             contenido = doc.get("contenido", "")
             if isinstance(embedding, list) and embedding:
@@ -140,22 +155,22 @@ def obtener_contexto_relevante(pregunta: str, supabase, k=TOP_K) -> str:
                 logger.debug(f"Documento sin embedding válido: {doc}")
 
         if not resultados:
-            logger.warning("⚠️ Ningún documento contenía embedding válido.")
+            logger.warning("Ningún documento contenía un embedding válido.")
             return ""
 
-        # Ordenamos localmente por score descendente
+        # Ordenar por score descendente y seleccionar los top k
         resultados.sort(key=lambda x: x[0], reverse=True)
-        # Seleccionamos top_k en base al score
         top_k_docs = [doc_text for _, doc_text in resultados[:k]]
-
-        logger.info(f"📚 Top-{k} documentos seleccionados como contexto.")
+        logger.info(f"Top-{k} documentos seleccionados como contexto.")
         return truncar_contexto("\n\n".join(top_k_docs))
 
     except Exception as e:
-        logger.error(f"❌ Error al recuperar contexto: {e}")
+        logger.error(f"Error al recuperar contexto: {e}")
         raise
 
-# === RESPUESTA CON GPT (con Prometheus y circuit breaker) ===
+# =============================================================================
+# RESPUESTA CON GPT (CON PROMETHEUS Y CIRCUIT BREAKER)
+# =============================================================================
 @circuit(failure_threshold=3, recovery_timeout=60)
 @GPT_RESPONSE_LATENCY.time()
 def responder_con_gpt(pregunta: str, contexto: str) -> str:
@@ -163,8 +178,7 @@ def responder_con_gpt(pregunta: str, contexto: str) -> str:
     Genera una respuesta con ChatCompletion de OpenAI usando el contexto provisto.
     """
     try:
-        system_prompt = (
-            "Eres un asistente experto en administración de fincas. Tu función es responder únicamente basándote en la información disponible en el contexto que te provea el sistema RAG, el cual utiliza embeddings generados a partir de datos extraídos de múltiples tablas de la base de datos Supabase. En particular, dispones de registros procesados y almacenados en la tabla documentos_embeddings, que integran información de las siguientes fuentes:
+        system_prompt = """Eres un asistente experto en administración de fincas. Tu función es responder únicamente basándote en la información disponible en el contexto que te provea el sistema RAG, el cual utiliza embeddings generados a partir de datos extraídos de múltiples tablas de la base de datos Supabase. En particular, dispones de registros procesados y almacenados en la tabla documentos_embeddings, que integran información de las siguientes fuentes:
 
 • Administraciones: Datos completos de las administraciones (nombre, dirección, teléfono, email).
 • Fincas: Información detallada de cada finca (nombre_finca, dirección_finca, número de puertas, administración asociada, etc.).
@@ -173,12 +187,11 @@ def responder_con_gpt(pregunta: str, contexto: str) -> str:
 
 El sistema RAG utiliza una búsqueda vectorial en la tabla documentos_embeddings para recuperar el contexto más relevante en función de la pregunta del usuario. Recuerda que:
 
-– Tu respuesta debe estar estrictamente fundamentada en el contenido recuperado (los documentos embeddings) y en la información que has procesado; si el contexto es insuficiente, debes indicar amablemente que no dispones de más información.
-– El usuario se identifica dinámicamente como {nombre_usuario} y tiene el rol {rol}. Las políticas de seguridad (Row-Level Security) y la configuración del sistema aseguran que solo se acceda a la información pertinente a la finca o fincas asignadas al usuario.
-– Debes emplear un lenguaje claro, preciso y adaptado a las necesidades de administración de fincas, abordando consultas sobre gestión, asignación de técnicos, reportes de incidencias u otros temas relacionados.
+– Tu respuesta debe estar estrictamente fundamentada en el contenido recuperado (los documentos embeddings) y en la información procesada; si el contexto es insuficiente, debes indicarlo amablemente al usuario.
+– El usuario se identifica dinámicamente y tiene asignado un rol. Las políticas de seguridad aseguran que solo se acceda a la información pertinente a la finca o fincas asignadas.
+– Emplea un lenguaje claro y preciso, adaptado a las necesidades de administración de fincas.
 
-Cuando respondas, utiliza únicamente el contexto que te es entregado y no inventes datos. Si la información no es suficiente para ofrecer una respuesta completa, indícalo amablemente al usuario."
-        )
+Cuando respondas, utiliza únicamente el contexto proporcionado y no inventes datos. Si la información no es suficiente para ofrecer una respuesta completa, indícalo al usuario."""
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Contexto:\n{contexto}\n\nPregunta: {pregunta}"}
@@ -189,48 +202,53 @@ Cuando respondas, utiliza únicamente el contexto que te es entregado y no inven
             temperature=0.2,
             timeout=15
         )
-        return completion.choices[0].message.content.strip()
+        respuesta = completion.choices[0].message.content.strip()
+        return respuesta
     except OpenAIError as e:
-        logger.error(f"❌ Error al generar respuesta con GPT: {e}")
+        logger.error(f"Error al generar respuesta con GPT: {e}")
         raise
 
-# === LRU CACHE LOCAL DE RESPUESTAS ===
+# =============================================================================
+# CACHE LOCAL PARA RESPUESTAS (LRU)
+# =============================================================================
 _respuestas_cache = {}
 
 def responder_pregunta(pregunta: str, user_id: str = None) -> str:
     """
-    Función principal que orquesta la obtención del contexto relevante y la generación de la respuesta final.
+    Orquesta la obtención del contexto relevante y la generación de la respuesta final.
+    Implementa un cache local para evitar recalcular respuestas.
     """
     session_id = str(uuid.uuid4())[:8]
     pregunta = sanitizar_pregunta(pregunta)
     if not pregunta:
         return "Por favor, formula una pregunta válida."
 
-    logger.info(f"🆔 Sesión: {session_id} (Usuario: {user_id})" if user_id else f"🆔 Sesión: {session_id}")
+    logger.info(f"Sesión {session_id} (Usuario: {user_id}) iniciado.")
 
-    # Revisar la caché local para evitar recalcular
     if pregunta in _respuestas_cache:
-        logger.info(f"⚡ [{session_id}] Respuesta recuperada de caché.")
+        logger.info(f"Sesión {session_id}: Respuesta recuperada de cache.")
         return _respuestas_cache[pregunta]
 
     try:
         supabase = conectar_supabase()
         contexto = obtener_contexto_relevante(pregunta, supabase)
         respuesta = responder_con_gpt(pregunta, contexto)
-        logger.info(f"✅ [{session_id}] Respuesta generada.")
+        logger.info(f"Sesión {session_id}: Respuesta generada correctamente.")
         _respuestas_cache[pregunta] = respuesta
         return respuesta
     except Exception as e:
-        logger.error(f"🚨 [{session_id}] Error: {e}")
+        logger.error(f"Sesión {session_id}: Error durante el procesamiento: {e}")
         return "Hubo un problema al procesar tu solicitud. Intenta más tarde."
 
-# === TEST MANUAL ===
+# =============================================================================
+# PRUEBA MANUAL (EJECUCIÓN DIRECTA)
+# =============================================================================
 if __name__ == "__main__":
     try:
         # Inicia el servidor de métricas en el puerto 8010
         start_http_server(8010)
-        pregunta = input("❓ Escribe tu pregunta: ")
+        pregunta = input("Escribe tu pregunta: ")
         respuesta = responder_pregunta(pregunta)
-        print(f"🧠 Respuesta:\n{respuesta}")
+        print(f"Respuesta:\n{respuesta}")
     except Exception as e:
-        logger.error(f"❌ Error en ejecución directa: {e}")
+        logger.error(f"Error en ejecución directa: {e}")
