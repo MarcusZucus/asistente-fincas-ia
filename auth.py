@@ -2,11 +2,12 @@
 auth.py - Módulo de Autenticación y Autorización para el sistema RAG.
 
 Este módulo se encarga de gestionar la autenticación y autorización en el sistema.
-En esta versión se actualiza la autenticación para que se efectúe escribiendo tan solo el número de teléfono.
+En esta versión se actualiza la autenticación para que siempre se asuma que quien habla es
+el usuario con id "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".
 Incluye las siguientes funcionalidades:
   - Creación de tokens de acceso (JWT) que permiten identificar a los usuarios de forma segura.
   - Verificación y decodificación de tokens para asegurar que la información es válida.
-  - Recuperación de la información del usuario desde la base de datos (utilizando Supabase) filtrando por número de teléfono.
+  - Recuperación de la información del usuario desde la base de datos (utilizando Supabase) a partir del id fijo.
   - Decorador para restringir el acceso a funciones en función del rol del usuario.
 """
 
@@ -33,6 +34,9 @@ from logger import get_logger
 
 # Crear un logger específico para este módulo con el nombre 'auth'
 logger = get_logger("auth")
+
+# ID fijo de usuario para este modo de autenticación
+DEFAULT_USER_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 
 # Validamos que las variables de conexión a Supabase existan.
 if not SUPABASE_URL or not SUPABASE_KEY:
@@ -105,7 +109,6 @@ def get_user_from_token(token: str) -> dict:
         logger.error("El token proporcionado no contiene el identificador de usuario ('sub').")
         raise ValueError("Token sin identificador de usuario")
 
-    # Consulta la tabla 'usuarios' en el esquema 'public'
     response = supabase_client.table("usuarios").select("*").eq("id", user_id).execute()
     if response.error:
         logger.error(f"Error al recuperar el usuario desde Supabase: {response.error}")
@@ -146,16 +149,10 @@ def require_role(required_roles: list):
         return wrapper
     return decorator
 
-def authenticate_by_phone(phone_number: str) -> (str, dict):
+def authenticate_default() -> (str, dict):
     """
-    Función de autenticación que valida el número de teléfono del usuario contra la base de datos.
-
-    Se realiza una consulta filtrando únicamente por el campo "telefono_movil".
-    Se asume que cada número de teléfono es único en la tabla "public.usuarios" y que la columna
-    "telefono_movil" es de tipo numérico.
-
-    Args:
-      phone_number (str): Número de teléfono a validar. Se convertirá a entero para coincidir con la columna.
+    Función de autenticación que siempre asume que quien habla es el usuario con id fijo DEFAULT_USER_ID.
+    Realiza la consulta en la tabla "usuarios" del esquema "public" filtrando por el id fijo.
 
     Returns:
       tuple: (access_token, user) donde:
@@ -163,32 +160,24 @@ def authenticate_by_phone(phone_number: str) -> (str, dict):
              - user (dict): Información del usuario autenticado.
 
     Raises:
-      ValueError: Si ocurre algún error durante la autenticación o si el número no corresponde a ningún usuario.
+      ValueError: Si ocurre algún error durante la autenticación o si el usuario no es encontrado.
     """
-    logger.info(f"Iniciando el proceso de autenticación para el número: {phone_number}")
-
-    # Convertir a int para hacer match con la columna numeric/intege
-    try:
-        phone_as_int = int(phone_number)
-    except ValueError:
-        logger.warning(f"No se pudo convertir el número '{phone_number}' a entero.")
-        raise ValueError("Número de teléfono inválido (no es un número entero).")
-
-    # Realizar la consulta
-    response = supabase_client.table("usuarios").select("*").eq("telefono_movil", phone_as_int).execute()
+    logger.info(f"Iniciando autenticación por defecto para el usuario con id {DEFAULT_USER_ID}")
+    
+    response = supabase_client.table("usuarios").select("*").eq("id", DEFAULT_USER_ID).execute()
     
     if response.error:
-        logger.error(f"Error durante la autenticación para el número {phone_number}: {response.error}")
+        logger.error(f"Error durante la autenticación por defecto: {response.error}")
         raise ValueError("Error durante la autenticación")
     
     if not response.data:
-        logger.warning(f"Número de teléfono no encontrado: {phone_number}")
-        raise ValueError("Número de teléfono inválido")
+        logger.warning(f"Usuario no encontrado con id: {DEFAULT_USER_ID}")
+        raise ValueError("Usuario no encontrado")
     
     user = response.data[0]
     token_data = {"sub": user["id"], "rol": user.get("rol", "user")}
     access_token = create_access_token(data=token_data)
-    logger.info(f"Usuario autenticado exitosamente: {user.get('nombre', user['id'])}. Token generado.")
+    logger.info(f"Usuario autenticado por defecto exitosamente: {user.get('nombre', user['id'])}. Token generado.")
     
     return access_token, user
 
@@ -203,11 +192,9 @@ if __name__ == "__main__":
         payload = verify_token(token)
         logger.info(f"Payload decodificado y verificado: {payload}")
         
-        # PRUEBA 2: Simulación de autenticación utilizando un número de teléfono.
-        # Nota: Asegúrate de que exista un usuario en la tabla "usuarios" con un campo 'telefono_movil' (tipo numeric)
-        phone = "1234567890"  # Reemplaza este valor con un número válido registrado en Supabase
-        token, user = authenticate_by_phone(phone)
-        logger.info(f"Usuario autenticado: {user}")
+        # PRUEBA 2: Simulación de autenticación por defecto.
+        token, user = authenticate_default()
+        logger.info(f"Usuario autenticado por defecto: {user}")
         
         # PRUEBA 3: Uso del decorador require_role para restringir acceso.
         @require_role(["admin"])
