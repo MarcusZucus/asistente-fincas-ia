@@ -118,9 +118,6 @@ def get_user_from_token(token: str) -> dict:
 
     # Se realiza la consulta filtrando por auth_user_id para cumplir la política de RLS.
     response = supabase_client.table("usuarios").select("*").eq("auth_user_id", user_id).execute()
-    if response.error:
-        logger.error(f"Error al recuperar el usuario desde Supabase: {response.error}")
-        raise ValueError("Error al recuperar usuario")
     if not response.data:
         logger.error(f"Usuario con auth_user_id '{user_id}' no fue encontrado en Supabase.")
         raise ValueError("Usuario no encontrado")
@@ -176,10 +173,6 @@ def authenticate_default() -> (str, dict):
     
     # Consulta utilizando auth_user_id para cumplir la política de RLS.
     response = supabase_client.table("usuarios").select("*").eq("auth_user_id", DEFAULT_USER_ID).execute()
-    
-    if response.error:
-        logger.error(f"Error durante la autenticación por defecto: {response.error}")
-        raise ValueError("Error durante la autenticación")
     
     if not response.data:
         logger.warning(f"Usuario no encontrado con auth_user_id: {DEFAULT_USER_ID}")
