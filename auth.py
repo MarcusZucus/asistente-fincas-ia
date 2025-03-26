@@ -222,16 +222,16 @@ def require_role(required_roles: list):
         return wrapper
     return decorator
 
-def authenticate(username: str, password: str) -> (str, dict):
+def authenticate(nombre_usuario: str, password: str) -> (str, dict):
     """
     Función de autenticación que valida las credenciales del usuario contra la base de datos.
 
-    Se asume que la tabla "usuarios" de Supabase contiene al menos los campos 'username' y 'password'.
+    Se asume que la tabla "usuarios" de Supabase contiene al menos los campos 'nombre_usuario' y 'password'.
     Para entornos de producción se recomienda almacenar las contraseñas de forma segura (usando hashing y sal)
     en lugar de texto claro.
 
     Args:
-      username (str): Nombre de usuario.
+      nombre_usuario (str): Nombre de usuario.
       password (str): Contraseña en texto claro (nota: en producción, se debe utilizar un mecanismo de verificación seguro).
 
     Returns:
@@ -247,22 +247,22 @@ def authenticate(username: str, password: str) -> (str, dict):
       >>> print(token)
       >>> print(user_info)
     """
-    logger.info(f"Iniciando el proceso de autenticación para el usuario: {username}")
+    logger.info(f"Iniciando el proceso de autenticación para el usuario: {nombre_usuario}")
     
     # NOTA IMPORTANTE: En producción, la contraseña debe ser verificada contra un hash almacenado de forma segura.
     response = supabase_client.table("usuarios").select("*") \
-        .eq("username", username) \
+        .eq("nombre_usuario", nombre_usuario) \
         .eq("password", password) \
         .execute()
     
     # Se registra si ocurre algún error durante la consulta.
     if response.error:
-        logger.error(f"Error durante la autenticación para el usuario {username}: {response.error}")
+        logger.error(f"Error durante la autenticación para el usuario {nombre_usuario}: {response.error}")
         raise ValueError("Error durante la autenticación")
     
     # Se verifica que se haya encontrado un usuario con las credenciales proporcionadas.
     if not response.data:
-        logger.warning(f"Credenciales inválidas para el usuario {username}.")
+        logger.warning(f"Credenciales inválidas para el usuario {nombre_usuario}.")
         raise ValueError("Credenciales inválidas")
     
     # Se obtiene el usuario (se asume que es el primer registro devuelto).
@@ -273,7 +273,7 @@ def authenticate(username: str, password: str) -> (str, dict):
     
     # Se genera el token de acceso utilizando la función create_access_token.
     access_token = create_access_token(data=token_data)
-    logger.info(f"Usuario '{username}' autenticado correctamente. Token generado exitosamente.")
+    logger.info(f"Usuario '{nombre_usuario}' autenticado correctamente. Token generado exitosamente.")
     
     return access_token, user
 
@@ -290,8 +290,8 @@ if __name__ == "__main__":
         
         # PRUEBA 2: Simulación de autenticación (requiere que exista un usuario de prueba en la base de datos).
         # Descomente y configure los siguientes valores según su entorno para probar la autenticación real.
-        # username, password = "test_user", "test_password"
-        # token, user = authenticate(username, password)
+        # nombre_usuario, password = "test_user", "test_password"
+        # token, user = authenticate(nombre_usuario, password)
         # logger.info(f"Usuario autenticado: {user}")
         
         # PRUEBA 3: Uso del decorador require_role para restringir acceso.
@@ -299,13 +299,12 @@ if __name__ == "__main__":
         def recurso_protegido(*args, **kwargs):
             # Se espera que el decorador inyecte la información del usuario en 'kwargs'
             user = kwargs.get("user")
-            # Se utiliza el campo 'username' si está disponible; de lo contrario, se usa un valor predeterminado.
-            return f"Acceso concedido a {user.get('username', 'desconocido')}"
+            # Se utiliza el campo 'nombre_usuario' si está disponible; de lo contrario, se usa un valor predeterminado.
+            return f"Acceso concedido a {user.get('nombre_usuario', 'desconocido')}"
         
         # Se ejecuta la función protegida pasando el token generado anteriormente.
         resultado = recurso_protegido(token=token)
         logger.info(f"Resultado del recurso protegido (acceso concedido): {resultado}")
         
     except Exception as e:
-        # Se captura cualquier excepción ocurrida durante las pruebas y se registra en el log.
         logger.error(f"Error durante las pruebas en auth.py: {e}")
