@@ -7,14 +7,14 @@ Las funcionalidades principales son:
   1. Cargar las variables de entorno necesarias (TOKEN de Telegram, URL del webhook, puerto, etc.).
   2. Configurar la aplicación de Telegram utilizando la librería python-telegram-bot.
   3. Definir los handlers:
-      - /start: Envia un mensaje de bienvenida al usuario.
-      - Manejador de mensajes: Procesa los mensajes de texto, valida la entrada, sanitiza la pregunta,
-        invoca la función de respuesta de IA (responder_pregunta) y envía la respuesta al usuario.
+      - /start: Envía un mensaje de bienvenida e instruye al usuario a ingresar su número de teléfono.
+      - Número de teléfono: Valida que el mensaje contenga solo dígitos y lo utiliza para autenticar al usuario.
+      - Manejador de mensajes: Una vez autenticado, procesa las preguntas del usuario, las sanitiza,
+         invoca la función de respuesta de IA (responder_pregunta) y envía la respuesta.
   4. Manejo robusto de errores: Se capturan y registran errores de red, bloqueos y excepciones inesperadas.
   5. Integración completa con el sistema centralizado de logging y configuración.
   
-Esta versión está diseñada para ser hiper robusta, completamente documentada y coherente con 
-el resto de los módulos (por ejemplo, config.py, logger.py, ia.py), sin redundancias ni inconsistencias.
+Esta versión está actualizada y diseñada para simplificar la autenticación: solo se pide el número de teléfono.
 """
 
 import logging
@@ -35,14 +35,13 @@ from telegram.error import NetworkError, Forbidden
 # Importar las funciones de IA que permiten responder a las preguntas del usuario y sanitizar la entrada
 from ia import responder_pregunta, sanitizar_pregunta
 
-# Importar la función de autenticación para validar credenciales
-from auth import authenticate
+# Importar la función para identificar al usuario por número
+from numero import identificar_usuario_por_numero
 
 # Importar el sistema de logging centralizado para mantener la coherencia en la salida de logs
 from logger import get_logger
 
 # Cargar variables de entorno para asegurar que las claves, URL y puertos estén disponibles.
-# Se utiliza dotenv para cargar un archivo .env, permitiendo configurar localmente en entornos de desarrollo.
 load_dotenv()
 
 # --- CONFIGURACIÓN DE VARIABLES GLOBALES DEL BOT ---
@@ -58,10 +57,6 @@ if not TELEGRAM_TOKEN or len(TELEGRAM_TOKEN) < 30:
 logger = get_logger("bot_telegram")
 logger.info("Logger global cargado correctamente en bot_telegram.")
 
-# Este diccionario o el propio context.user_data servirá para llevar el estado de autenticación de cada usuario.
-# En este ejemplo, usaremos context.user_data en lugar de un diccionario global.
-# usuarios_autenticados = {}
-
 # --- DEFINICIÓN DE HANDLERS DEL BOT ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -69,122 +64,95 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Handler para el comando /start.
 
     Esta función se invoca cuando un usuario envía el comando /start.
-    Envía un mensaje de bienvenida personalizado y registra en el log la acción.
+    Envía un mensaje de bienvenida e instruye al usuario a ingresar su número de teléfono para autenticarse.
 
-    Además, se pide al usuario que ingrese sus credenciales en formato usuario:contraseña.
-    
     Args:
       update (Update): Objeto que contiene la información de la actualización recibida de Telegram.
       context (ContextTypes.DEFAULT_TYPE): Contexto de la aplicación, usado para pasar información adicional.
-    
-    Ejemplo:
-      Cuando el usuario envía "/start", se envía un mensaje de bienvenida y se registra el evento.
     """
     mensaje_bienvenida = (
-        "üëã ¡Bienvenido! Soy tu asistente de administración de fincas.\n\n"
-        "Para continuar, ingresa tus credenciales en formato:\n"
-        "usuario:contraseña\n\n"
-        "Ejemplo: marco:MiPassword123\n\n"
-        "Después de autenticado, puedes hacer preguntas como:\n"
-        "¬øCómo puedo contactar al portero?"
+        "¡Bienvenido! Soy tu asistente de administración de fincas.\n\n"
+        "Para continuar, por favor ingresa tu número de teléfono tal como aparece en nuestros registros.\n"
+        "Ejemplo: 1234567890\n\n"
+        "Una vez autenticado, podrás hacer preguntas relacionadas con la gestión de fincas."
     )
-    # Enviar el mensaje de bienvenida utilizando el método reply_text
     await update.message.reply_text(mensaje_bienvenida)
     logger.debug("Mensaje de bienvenida enviado a través del comando /start.")
 
-async def credenciales_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def numero_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Handler para procesar credenciales en formato usuario:contraseña.
+    Handler para procesar el número de teléfono enviado por el usuario.
 
-    Si la autenticación es exitosa, se almacena la información en context.user_data
-    para indicar que el usuario está autenticado.
+    Se utiliza la función identificar_usuario_por_numero para autenticar al usuario.
+    Si el número es válido y se encuentra en la base de datos, se guarda la información del usuario en context.user_data.
     """
-    mensaje = update.message.text.strip()
-    if ":" not in mensaje:
-        await update.message.reply_text("Formato inválido. Ingresa usuario:contraseña.")
+    numero = update.message.text.strip()
+    if not numero.isdigit():
+        await update.message.reply_text("Formato inválido. Ingresa solo números de teléfono.")
         return
 
     try:
-        usuario, contrasena = mensaje.split(":", 1)
-        usuario = usuario.strip()
-        contrasena = contrasena.strip()
-
-        token, user_data = authenticate(usuario, contrasena)
-        context.user_data["token"] = token
-        context.user_data["user"] = user_data
-
-        await update.message.reply_text(
-            f"¡Hola {user_data.get('nombre', 'usuario')}! Te has autenticado correctamente."
-        )
-        logger.info(f"Usuario '{usuario}' autenticado exitosamente.")
-
+        usuario = identificar_usuario_por_numero(numero)
+        if usuario:
+            context.user_data["user"] = usuario
+            await update.message.reply_text(
+                f"¡Hola {usuario.get('nombre', 'usuario')}! Te has autenticado correctamente."
+            )
+            logger.info(f"Usuario con número {numero} autenticado exitosamente.")
+        else:
+            await update.message.reply_text("Número no encontrado. Por favor, intenta nuevamente.")
+            logger.warning(f"Número {numero} no encontrado en la base de datos.")
     except Exception as e:
-        logger.error(f"Error durante la autenticación: {e}", exc_info=True)
-        await update.message.reply_text("Credenciales inválidas. Intenta nuevamente.")
+        logger.error(f"Error durante la autenticación por número: {e}", exc_info=True)
+        await update.message.reply_text("Error en la autenticación. Intenta nuevamente.")
 
 async def manejar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Handler para procesar los mensajes de texto que no sean comandos.
 
     Funcionalidades:
-      - Verifica si el usuario está autenticado (si no, se solicita ingresar credenciales).
+      - Verifica si el usuario está autenticado (si no, se solicita ingresar el número de teléfono).
       - Valida que el mensaje tenga contenido de texto.
       - Sanitiza la entrada para eliminar caracteres no permitidos.
       - Verifica que la longitud del mensaje sanitizado no exceda los límites permitidos (500 caracteres).
       - Registra la pregunta del usuario junto con su ID.
       - Invoca la función responder_pregunta del módulo de IA para generar una respuesta.
       - Envía la respuesta generada al usuario.
-    
+
     Args:
       update (Update): Objeto de actualización de Telegram que contiene la información del mensaje.
       context (ContextTypes.DEFAULT_TYPE): Contexto de la aplicación.
-    
-    Ejemplo:
-      Si un usuario envía un mensaje de texto, la función lo procesa, sanitiza y responde con la información
-      proporcionada por el módulo de IA, registrando el proceso en el log.
     """
     try:
-        # Verificar si el usuario ya está autenticado
-        if "token" not in context.user_data:
-            await update.message.reply_text("Debes ingresar credenciales en formato usuario:contraseña para continuar.")
+        if "user" not in context.user_data:
+            await update.message.reply_text("Debes autenticarte ingresando tu número de teléfono para continuar.")
             logger.warning("Usuario no autenticado intentando enviar mensajes.")
             return
 
-        # Validar que el mensaje recibido contenga texto
         if not update.message or not update.message.text:
             await update.message.reply_text("Por favor, envíame un mensaje de texto.")
             logger.warning("Mensaje sin contenido de texto recibido; se ha solicitado enviar texto.")
             return
 
-        # Extraer el contenido del mensaje
         mensaje = update.message.text
-        # Sanitizar el mensaje eliminando caracteres no permitidos y recortándolo a 500 caracteres máximo
         mensaje_sanitizado = sanitizar_pregunta(mensaje)
         if len(mensaje_sanitizado) > 500:
             await update.message.reply_text("Pregunta demasiado larga (máx. 500 caracteres).")
             logger.warning("Mensaje demasiado largo recibido; se ha informado al usuario sobre el límite.")
             return
 
-        # Obtener el identificador del usuario que envió el mensaje
         user_id = update.message.from_user.id
         logger.info(f"Usuario {user_id}: Pregunta recibida -> '{mensaje_sanitizado}'")
-
-        # Llamar a la función de IA para obtener una respuesta basada en la pregunta sanitizada
         respuesta = responder_pregunta(mensaje_sanitizado, user_id=str(user_id))
         logger.info(f"Usuario {user_id}: Respuesta generada -> '{respuesta}'")
-
-        # Enviar la respuesta generada al usuario
         await update.message.reply_text(respuesta)
         logger.debug(f"Respuesta enviada correctamente al usuario {user_id}.")
 
     except NetworkError as e:
-        # Capturar errores de red, que pueden ocurrir si hay problemas de conectividad entre Telegram y el servidor
         logger.error(f"Error de red con Telegram: {e}", exc_info=True)
     except Forbidden:
-        # Capturar la excepción Forbidden, que puede ocurrir si el usuario ha bloqueado al bot
         logger.warning("El usuario ha bloqueado al bot; omitiendo respuesta.")
     except Exception as e:
-        # Capturar cualquier otra excepción inesperada y notificar al usuario de un error general
         logger.error(f"Error inesperado al procesar el mensaje: {e}", exc_info=True)
         await update.message.reply_text("Ha ocurrido un error. Intenta más tarde.")
 
@@ -194,38 +162,31 @@ def build_bot():
 
     Proceso:
       - Se crea una instancia de ApplicationBuilder usando el token de Telegram.
-      - Se registran los handlers para los comandos y mensajes de texto.
+      - Se registran los handlers para el comando /start, la autenticación (número de teléfono) y el manejo de preguntas.
       - Se registra en el log que el bot ha sido configurado correctamente.
-    
+
     Returns:
       Application: La instancia de la aplicación configurada, lista para iniciarse.
-    
-    Ejemplo:
-      >>> app = build_bot()
-      >>> app.run_polling()
     """
-    # Crear la aplicación de Telegram utilizando el token configurado
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     # Registrar el handler para el comando /start
     app.add_handler(CommandHandler("start", start))
 
-    # Registrar el handler para credenciales (texto con ':')
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(":"), credenciales_handler))
+    # Registrar el handler para la autenticación: se espera un mensaje que contenga solo números
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex("^[0-9]+$"), numero_handler))
 
-    # Registrar el handler para mensajes de texto que no sean comandos ni credenciales
+    # Registrar el handler para mensajes de texto (preguntas) que no sean comandos
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensaje))
 
     logger.info("Bot de Telegram configurado correctamente en build_bot().")
     return app
 
-# Esta sección de código se ejecuta solo si se corre este módulo de forma directa.
+# Ejecución directa del módulo para pruebas locales
 if __name__ == "__main__":
     logger.info("Iniciando ejecución directa de bot_telegram.py para pruebas locales.")
     try:
-        # Construir la aplicación del bot
         bot_app = build_bot()
-        # Iniciar el bot en modo polling (alternativamente se puede iniciar en webhook según la configuración)
         logger.info("Bot iniciado en modo polling. Presiona Ctrl+C para detener.")
         bot_app.run_polling()
     except Exception as e:
