@@ -38,7 +38,7 @@ def main():
       3. Se registra en el log el inicio de la configuración del webhook.
       4. Se inicia el webhook con la configuración:
          - 'listen': Se utiliza "0.0.0.0" para escuchar en todas las interfaces de red.
-         - 'port': Se extrae del entorno, con un valor por defecto de 8443.
+         - 'port': Se extrae del entorno, con un valor de 8080.
          - 'url_path': Se utiliza el token de Telegram como parte de la ruta, para mejorar la seguridad.
          - 'webhook_url': Se construye concatenando la URL base y el token.
       5. En caso de error, se captura y se registra el error crítico y se vuelve a lanzar la excepción para
@@ -58,7 +58,7 @@ def main():
         # Cargar y validar las variables de entorno específicas para Telegram
         TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
         WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://asistente-fincas-ia-production.up.railway.app")
-        PORT = int(os.getenv("PORT", 8443))
+        PORT = int(os.getenv("PORT", 8080))
 
         # Validar que el token de Telegram esté correctamente configurado
         if not TELEGRAM_TOKEN or len(TELEGRAM_TOKEN) < 30:
