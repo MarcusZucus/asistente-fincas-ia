@@ -7,13 +7,14 @@ Las funcionalidades principales son:
   1. Cargar las variables de entorno necesarias (TOKEN de Telegram, URL del webhook, puerto, etc.).
   2. Configurar la aplicación de Telegram utilizando la librería python-telegram-bot.
   3. Definir los handlers:
-      - /start: Envía un mensaje de bienvenida y autentica automáticamente al usuario usando el id fijo.
+      - /start: Envía un mensaje de bienvenida e inicia la sesión del usuario mediante la función 
+                iniciar_sesion_bot() del módulo auth.
       - Manejador de mensajes: Una vez autenticado, procesa las preguntas del usuario, las sanitiza,
          invoca la función de respuesta de IA (responder_pregunta) y envía la respuesta.
   4. Manejo robusto de errores: Se capturan y registran errores de red, bloqueos y excepciones inesperadas.
   5. Integración completa con el sistema centralizado de logging y configuración.
   
-Esta versión está actualizada para trabajar con el nuevo auth, que asume que quien habla es el usuario con id fijo.
+Esta versión utiliza el nuevo módulo auth, el cual encapsula la lógica de autenticación.
 """
 
 import logging
@@ -34,8 +35,8 @@ from telegram.error import NetworkError, Forbidden
 # Importar las funciones de IA para responder preguntas y sanitizar el texto
 from ia import responder_pregunta, sanitizar_pregunta
 
-# Importar la función de autenticación por defecto (usuario fijo) del módulo auth
-from auth import authenticate_default
+# Importar la función de inicio de sesión para el bot desde auth
+from auth import iniciar_sesion_bot
 
 # Importar el sistema de logging centralizado
 from logger import get_logger
@@ -60,21 +61,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Handler para el comando /start.
 
-    Al recibir /start, se autentica automáticamente el usuario usando el método por defecto,
-    y se informa al usuario que ya está autenticado.
+    Al recibir /start, se inicia la sesión del usuario mediante iniciar_sesion_bot(),
+    que encapsula la lógica de autenticación por defecto. Se informa al usuario que ya está autenticado.
     """
     try:
-        token, user = authenticate_default()
-        context.user_data["token"] = token
-        context.user_data["user"] = user
+        # Inicia la sesión en el bot utilizando la función encapsulada en auth.py
+        iniciar_sesion_bot(context)
+        user = context.user_data.get("user", {})
         mensaje_bienvenida = (
             f"¡Bienvenido! Te has autenticado automáticamente como {user.get('nombre', 'usuario')}.\n\n"
             "Ahora puedes hacer preguntas relacionadas con la gestión de fincas."
         )
         await update.message.reply_text(mensaje_bienvenida)
-        logger.info(f"Usuario autenticado por defecto: {user.get('nombre', user['id'])}")
+        logger.info(f"Usuario autenticado por defecto: {user.get('nombre', user.get('id', 'desconocido'))}")
     except Exception as e:
-        logger.error(f"Error durante la autenticación por defecto: {e}", exc_info=True)
+        logger.error(f"Error durante la autenticación: {e}", exc_info=True)
         await update.message.reply_text("Error durante la autenticación. Intenta más tarde.")
 
 async def manejar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):

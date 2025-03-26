@@ -3,12 +3,16 @@ auth.py - Módulo de Autenticación y Autorización para el sistema RAG.
 
 Este módulo se encarga de gestionar la autenticación y autorización en el sistema.
 En esta versión se actualiza la autenticación para que siempre se asuma que quien habla es
-el usuario con id "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".
+el usuario con id "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa". Además, se ha encapsulado la
+lógica de autenticación para entornos de bots (por ejemplo, Telegram) en la función
+iniciar_sesion_bot(), de modo que el bot no tenga que conocer los detalles de la autenticación.
 Incluye las siguientes funcionalidades:
   - Creación de tokens de acceso (JWT) que permiten identificar a los usuarios de forma segura.
   - Verificación y decodificación de tokens para asegurar que la información es válida.
   - Recuperación de la información del usuario desde la base de datos (utilizando Supabase) a partir del id fijo.
   - Decorador para restringir el acceso a funciones en función del rol del usuario.
+  - Función iniciar_sesion_bot() que encapsula la autenticación por defecto para el bot, 
+    almacenando la sesión en el contexto.
 """
 
 import datetime
@@ -47,6 +51,7 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 logger.info("Cliente Supabase inicializado correctamente en auth.py. La conexión a la base de datos ha sido establecida.")
 
+
 def create_access_token(data: dict, expires_delta: datetime.timedelta = None) -> str:
     """
     Genera y retorna un token JWT que encapsula la información del usuario.
@@ -69,6 +74,7 @@ def create_access_token(data: dict, expires_delta: datetime.timedelta = None) ->
     logger.debug(f"Token generado con expiración {expire.isoformat()}. Payload: {to_encode}")
     return encoded_jwt
 
+
 def verify_token(token: str) -> dict:
     """
     Verifica y decodifica un token JWT para asegurarse de que es válido y no ha expirado.
@@ -89,6 +95,7 @@ def verify_token(token: str) -> dict:
     except JWTError as e:
         logger.error(f"Fallo en la verificación del token: {e}. El token puede ser inválido o haber expirado.")
         raise ValueError("Token no válido o expirado") from e
+
 
 def get_user_from_token(token: str) -> dict:
     """
@@ -121,6 +128,7 @@ def get_user_from_token(token: str) -> dict:
     logger.debug(f"Usuario recuperado exitosamente: {user}")
     return user
 
+
 def require_role(required_roles: list):
     """
     Decorador para restringir el acceso a funciones en función del rol del usuario.
@@ -148,6 +156,7 @@ def require_role(required_roles: list):
             return func(*args, **kwargs)
         return wrapper
     return decorator
+
 
 def authenticate_default() -> (str, dict):
     """
@@ -181,6 +190,31 @@ def authenticate_default() -> (str, dict):
     
     return access_token, user
 
+
+def iniciar_sesion_bot(context) -> None:
+    """
+    Encapsula la lógica de autenticación por defecto para ser utilizada en entornos de bot (ej. Telegram).
+
+    Esta función realiza lo siguiente:
+      1. Llama a authenticate_default() para obtener el token y la información del usuario.
+      2. Almacena en el contexto del bot (context.user_data) tanto el token como la información del usuario.
+         Esto permite que el bot utilice esta sesión sin conocer los detalles internos de autenticación.
+      3. Si en el futuro se modifica el método de autenticación (por ejemplo, usando email y PIN, SMS, etc.),
+         solo se deberá actualizar esta función sin necesidad de modificar la lógica del bot.
+
+    Args:
+      context: El contexto de la aplicación del bot, que posee el atributo user_data para almacenar la sesión.
+    """
+    try:
+        token, user = authenticate_default()
+        context.user_data["token"] = token
+        context.user_data["user"] = user
+        logger.info(f"Sesión iniciada correctamente para el usuario: {user.get('nombre', user['id'])}")
+    except Exception as e:
+        logger.error(f"Error al iniciar sesión en el bot: {e}")
+        raise
+
+
 # Se incluye una sección de pruebas y ejemplos que se ejecutan cuando se corre este módulo directamente.
 if __name__ == "__main__":
     try:
@@ -204,6 +238,15 @@ if __name__ == "__main__":
         
         resultado = recurso_protegido(token=token)
         logger.info(f"Resultado del recurso protegido (acceso concedido): {resultado}")
+        
+        # PRUEBA 4: Simulación de inicio de sesión en un contexto de bot.
+        class DummyContext:
+            def __init__(self):
+                self.user_data = {}
+        
+        dummy_context = DummyContext()
+        iniciar_sesion_bot(dummy_context)
+        logger.info(f"Contexto tras iniciar sesión: {dummy_context.user_data}")
         
     except Exception as e:
         logger.error(f"Error durante las pruebas en auth.py: {e}")
