@@ -116,12 +116,13 @@ def get_user_from_token(token: str) -> dict:
         logger.error("El token proporcionado no contiene el identificador de usuario ('sub').")
         raise ValueError("Token sin identificador de usuario")
 
-    response = supabase_client.table("usuarios").select("*").eq("id", user_id).execute()
+    # Se realiza la consulta filtrando por auth_user_id para cumplir la política de RLS.
+    response = supabase_client.table("usuarios").select("*").eq("auth_user_id", user_id).execute()
     if response.error:
         logger.error(f"Error al recuperar el usuario desde Supabase: {response.error}")
         raise ValueError("Error al recuperar usuario")
     if not response.data:
-        logger.error(f"Usuario con id '{user_id}' no fue encontrado en Supabase.")
+        logger.error(f"Usuario con auth_user_id '{user_id}' no fue encontrado en Supabase.")
         raise ValueError("Usuario no encontrado")
 
     user = response.data[0]
@@ -161,7 +162,7 @@ def require_role(required_roles: list):
 def authenticate_default() -> (str, dict):
     """
     Función de autenticación que siempre asume que quien habla es el usuario con id fijo DEFAULT_USER_ID.
-    Realiza la consulta en la tabla "usuarios" del esquema "public" filtrando por el id fijo.
+    Realiza la consulta en la tabla "usuarios" del esquema "public" filtrando por auth_user_id.
 
     Returns:
       tuple: (access_token, user) donde:
@@ -171,22 +172,24 @@ def authenticate_default() -> (str, dict):
     Raises:
       ValueError: Si ocurre algún error durante la autenticación o si el usuario no es encontrado.
     """
-    logger.info(f"Iniciando autenticación por defecto para el usuario con id {DEFAULT_USER_ID}")
+    logger.info(f"Iniciando autenticación por defecto para el usuario con auth_user_id {DEFAULT_USER_ID}")
     
-    response = supabase_client.table("usuarios").select("*").eq("id", DEFAULT_USER_ID).execute()
+    # Consulta utilizando auth_user_id para cumplir la política de RLS.
+    response = supabase_client.table("usuarios").select("*").eq("auth_user_id", DEFAULT_USER_ID).execute()
     
     if response.error:
         logger.error(f"Error durante la autenticación por defecto: {response.error}")
         raise ValueError("Error durante la autenticación")
     
     if not response.data:
-        logger.warning(f"Usuario no encontrado con id: {DEFAULT_USER_ID}")
+        logger.warning(f"Usuario no encontrado con auth_user_id: {DEFAULT_USER_ID}")
         raise ValueError("Usuario no encontrado")
     
     user = response.data[0]
-    token_data = {"sub": user["id"], "rol": user.get("rol", "user")}
+    # Se genera el token con sub igual al valor de auth_user_id para que la verificación futura coincida.
+    token_data = {"sub": user["auth_user_id"], "rol": user.get("rol", "user")}
     access_token = create_access_token(data=token_data)
-    logger.info(f"Usuario autenticado por defecto exitosamente: {user.get('nombre', user['id'])}. Token generado.")
+    logger.info(f"Usuario autenticado por defecto exitosamente: {user.get('nombre', user['auth_user_id'])}. Token generado.")
     
     return access_token, user
 
@@ -209,7 +212,7 @@ def iniciar_sesion_bot(context) -> None:
         token, user = authenticate_default()
         context.user_data["token"] = token
         context.user_data["user"] = user
-        logger.info(f"Sesión iniciada correctamente para el usuario: {user.get('nombre', user['id'])}")
+        logger.info(f"Sesión iniciada correctamente para el usuario: {user.get('nombre', user['auth_user_id'])}")
     except Exception as e:
         logger.error(f"Error al iniciar sesión en el bot: {e}")
         raise
