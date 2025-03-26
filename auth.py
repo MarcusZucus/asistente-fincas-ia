@@ -222,50 +222,48 @@ def require_role(required_roles: list):
         return wrapper
     return decorator
 
-def authenticate(nombre_usuario: str, password: str) -> (str, dict):
+def authenticate(credential: str) -> (str, dict):
     """
-    Función de autenticación que valida las credenciales del usuario contra la base de datos.
-
-    Se asume que la tabla "usuarios" de Supabase contiene al menos los campos 'nombre_usuario' y 'password'.
-    Para entornos de producción se recomienda almacenar las contraseñas de forma segura (usando hashing y sal)
-    en lugar de texto claro.
-
+    Función de autenticación que valida la credencial del usuario contra la base de datos.
+    
+    Ahora se asume que el usuario puede identificarse y validarse proporcionando solo uno de
+    los siguientes valores: nombre de usuario, id o password (tal como están almacenados en la tabla "usuarios").
+    
+    La consulta se realiza utilizando una cláusula OR que verifica si la credencial coincide en alguno de los tres campos.
+    
     Args:
-      nombre_usuario (str): Nombre de usuario.
-      password (str): Contraseña en texto claro (nota: en producción, se debe utilizar un mecanismo de verificación seguro).
-
+      credential (str): Valor que puede ser el nombre de usuario, el id o la password.
+    
     Returns:
       tuple: Una tupla (access_token, user) donde:
              - access_token (str): Token JWT generado que autoriza al usuario.
              - user (dict): Diccionario con la información del usuario autenticado.
-
+    
     Raises:
-      ValueError: Si ocurre algún error durante la autenticación o si las credenciales son inválidas.
+      ValueError: Si ocurre algún error durante la autenticación o si la credencial no corresponde a ningún usuario.
     
     Ejemplo:
-      >>> token, user_info = authenticate("usuario_test", "contraseña_segura")
+      >>> token, user_info = authenticate("usuario_test")
       >>> print(token)
       >>> print(user_info)
     """
-    logger.info(f"Iniciando el proceso de autenticación para el usuario: {nombre_usuario}")
+    logger.info(f"Iniciando el proceso de autenticación para la credencial: {credential}")
     
-    # NOTA IMPORTANTE: En producción, la contraseña debe ser verificada contra un hash almacenado de forma segura.
-    response = supabase_client.table("usuarios").select("*") \
-        .eq("nombre_usuario", nombre_usuario) \
-        .eq("password", password) \
-        .execute()
+    # Se realiza la consulta buscando registros donde la credencial coincida en cualquiera de los campos:
+    # nombre_usuario, id o password.
+    # La sintaxis de or en el cliente Supabase requiere una cadena con las condiciones separadas por comas.
+    query_or = f'nombre_usuario.eq."{credential}",id.eq."{credential}",password.eq."{credential}"'
+    response = supabase_client.table("usuarios").select("*").or_(query_or).execute()
     
-    # Se registra si ocurre algún error durante la consulta.
     if response.error:
-        logger.error(f"Error durante la autenticación para el usuario {nombre_usuario}: {response.error}")
+        logger.error(f"Error durante la autenticación para la credencial {credential}: {response.error}")
         raise ValueError("Error durante la autenticación")
     
-    # Se verifica que se haya encontrado un usuario con las credenciales proporcionadas.
     if not response.data:
-        logger.warning(f"Credenciales inválidas para el usuario {nombre_usuario}.")
-        raise ValueError("Credenciales inválidas")
+        logger.warning(f"Credencial inválida: {credential}")
+        raise ValueError("Credencial inválida")
     
-    # Se obtiene el usuario (se asume que es el primer registro devuelto).
+    # Se obtiene el primer registro que cumpla la condición.
     user = response.data[0]
     
     # Se prepara el payload para el token con el identificador y rol del usuario.
@@ -273,7 +271,7 @@ def authenticate(nombre_usuario: str, password: str) -> (str, dict):
     
     # Se genera el token de acceso utilizando la función create_access_token.
     access_token = create_access_token(data=token_data)
-    logger.info(f"Usuario '{nombre_usuario}' autenticado correctamente. Token generado exitosamente.")
+    logger.info(f"Usuario autenticado exitosamente: {user.get('nombre_usuario', user['id'])}. Token generado.")
     
     return access_token, user
 
@@ -288,18 +286,18 @@ if __name__ == "__main__":
         payload = verify_token(token)
         logger.info(f"Payload decodificado y verificado: {payload}")
         
-        # PRUEBA 2: Simulación de autenticación (requiere que exista un usuario de prueba en la base de datos).
-        # Descomente y configure los siguientes valores según su entorno para probar la autenticación real.
-        # nombre_usuario, password = "test_user", "test_password"
-        # token, user = authenticate(nombre_usuario, password)
-        # logger.info(f"Usuario autenticado: {user}")
+        # PRUEBA 2: Simulación de autenticación utilizando una credencial.
+        # Nota: Asegúrate de que exista un usuario en la tabla "usuarios" que tenga alguno de los valores
+        # en los campos 'nombre_usuario', 'id' o 'password' igual a la credencial utilizada.
+        credential = "valor_de_prueba"  # Reemplaza este valor con una credencial válida
+        token, user = authenticate(credential)
+        logger.info(f"Usuario autenticado: {user}")
         
         # PRUEBA 3: Uso del decorador require_role para restringir acceso.
         @require_role(["admin"])
         def recurso_protegido(*args, **kwargs):
             # Se espera que el decorador inyecte la información del usuario en 'kwargs'
             user = kwargs.get("user")
-            # Se utiliza el campo 'nombre_usuario' si está disponible; de lo contrario, se usa un valor predeterminado.
             return f"Acceso concedido a {user.get('nombre_usuario', 'desconocido')}"
         
         # Se ejecuta la función protegida pasando el token generado anteriormente.
