@@ -31,7 +31,7 @@ TABLA_EMBEDDINGS = os.getenv("TABLA_EMBEDDINGS", "documentos_embeddings")
 # --- Telegram ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://asistente-fincas-ia-production.up.railway.app")
-PORT = int(os.getenv("PORT", 8443))
+PORT = int(os.getenv("PORT", 8080))
 
 # --- JWT y Autenticación ---
 SECRET_KEY = os.getenv("SECRET_KEY", "supersecretkey")

@@ -17,6 +17,8 @@ RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 # Copiar el resto de los archivos del proyecto
 COPY . .
 
-EXPOSE 8000 8010
+# Expón el puerto que realmente usarás en Railway
+EXPOSE 8080
 
-CMD ["python", "bot_telegram.py"]
+# Arranque oficial del bot en modo producción (con webhook)
+CMD ["python", "main.py"]
