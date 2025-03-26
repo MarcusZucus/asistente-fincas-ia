@@ -104,6 +104,8 @@ def get_user_from_token(token: str) -> dict:
     if not user_id:
         logger.error("El token proporcionado no contiene el identificador de usuario ('sub').")
         raise ValueError("Token sin identificador de usuario")
+
+    # Consulta la tabla 'usuarios' en el esquema 'public'
     response = supabase_client.table("usuarios").select("*").eq("id", user_id).execute()
     if response.error:
         logger.error(f"Error al recuperar el usuario desde Supabase: {response.error}")
@@ -111,6 +113,7 @@ def get_user_from_token(token: str) -> dict:
     if not response.data:
         logger.error(f"Usuario con id '{user_id}' no fue encontrado en Supabase.")
         raise ValueError("Usuario no encontrado")
+
     user = response.data[0]
     logger.debug(f"Usuario recuperado exitosamente: {user}")
     return user
@@ -148,10 +151,11 @@ def authenticate_by_phone(phone_number: str) -> (str, dict):
     Función de autenticación que valida el número de teléfono del usuario contra la base de datos.
 
     Se realiza una consulta filtrando únicamente por el campo "telefono_movil".
-    Se asume que cada número de teléfono es único en la tabla "usuarios".
+    Se asume que cada número de teléfono es único en la tabla "public.usuarios" y que la columna
+    "telefono_movil" es de tipo numérico.
 
     Args:
-      phone_number (str): Número de teléfono a validar.
+      phone_number (str): Número de teléfono a validar. Se convertirá a entero para coincidir con la columna.
 
     Returns:
       tuple: (access_token, user) donde:
@@ -162,8 +166,16 @@ def authenticate_by_phone(phone_number: str) -> (str, dict):
       ValueError: Si ocurre algún error durante la autenticación o si el número no corresponde a ningún usuario.
     """
     logger.info(f"Iniciando el proceso de autenticación para el número: {phone_number}")
-    
-    response = supabase_client.table("usuarios").select("*").eq("telefono_movil", phone_number).execute()
+
+    # Convertir a int para hacer match con la columna numeric/intege
+    try:
+        phone_as_int = int(phone_number)
+    except ValueError:
+        logger.warning(f"No se pudo convertir el número '{phone_number}' a entero.")
+        raise ValueError("Número de teléfono inválido (no es un número entero).")
+
+    # Realizar la consulta
+    response = supabase_client.table("usuarios").select("*").eq("telefono_movil", phone_as_int).execute()
     
     if response.error:
         logger.error(f"Error durante la autenticación para el número {phone_number}: {response.error}")
@@ -176,7 +188,7 @@ def authenticate_by_phone(phone_number: str) -> (str, dict):
     user = response.data[0]
     token_data = {"sub": user["id"], "rol": user.get("rol", "user")}
     access_token = create_access_token(data=token_data)
-    logger.info(f"Usuario autenticado exitosamente: {user.get('nombre_usuario', user['id'])}. Token generado.")
+    logger.info(f"Usuario autenticado exitosamente: {user.get('nombre', user['id'])}. Token generado.")
     
     return access_token, user
 
@@ -192,7 +204,7 @@ if __name__ == "__main__":
         logger.info(f"Payload decodificado y verificado: {payload}")
         
         # PRUEBA 2: Simulación de autenticación utilizando un número de teléfono.
-        # Nota: Asegúrate de que exista un usuario en la tabla "usuarios" con un campo 'telefono_movil' igual a '1234567890'
+        # Nota: Asegúrate de que exista un usuario en la tabla "usuarios" con un campo 'telefono_movil' (tipo numeric)
         phone = "1234567890"  # Reemplaza este valor con un número válido registrado en Supabase
         token, user = authenticate_by_phone(phone)
         logger.info(f"Usuario autenticado: {user}")
@@ -201,7 +213,7 @@ if __name__ == "__main__":
         @require_role(["admin"])
         def recurso_protegido(*args, **kwargs):
             user = kwargs.get("user")
-            return f"Acceso concedido a {user.get('nombre_usuario', 'desconocido')}"
+            return f"Acceso concedido a {user.get('nombre', 'desconocido')}"
         
         resultado = recurso_protegido(token=token)
         logger.info(f"Resultado del recurso protegido (acceso concedido): {resultado}")
