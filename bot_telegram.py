@@ -62,19 +62,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Handler para el comando /start.
 
     Al recibir /start, se inicia la sesión del usuario mediante iniciar_sesion_bot(),
-    que encapsula la lógica de autenticación por defecto. Se informa al usuario que ya está autenticado.
+    que encapsula la lógica de autenticación por defecto. Se informa al usuario que ya está autenticado,
+    mostrando los datos relevantes del usuario.
     """
     try:
         # Inicia la sesión en el bot utilizando la función encapsulada en auth.py
         iniciar_sesion_bot(context)
         user = context.user_data.get("user", {})
         mensaje_bienvenida = (
-            f" f"¡Bienvenido {user.get('nombre', 'usuario')}!\n\n"
-    f"Datos de usuario:\n"
-    f"ID: {user.get('auth_user_id', 'N/A')}\n"
-    f"Rol: {user.get('rol', 'N/A')}\n"
-    f"Email: {user.get('email', 'N/A')}\n\n"
-    "Ahora puedes hacer preguntas relacionadas con la gestión de fincas."
+            f"¡Bienvenido {user.get('nombre', 'usuario')}!\n\n"
+            "Detalles de autenticación:\n"
+            f"ID: {user.get('auth_user_id', 'N/A')}\n"
+            f"Rol: {user.get('rol', 'N/A')}\n"
+            f"Email: {user.get('email', 'N/A')}\n\n"
+            "Ahora puedes hacer preguntas relacionadas con la gestión de fincas."
         )
         await update.message.reply_text(mensaje_bienvenida)
         logger.info(f"Usuario autenticado por defecto: {user.get('nombre', user.get('id', 'desconocido'))}")
