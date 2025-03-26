@@ -69,8 +69,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         iniciar_sesion_bot(context)
         user = context.user_data.get("user", {})
         mensaje_bienvenida = (
-            f"¡Bienvenido! Te has autenticado automáticamente como {user.get('nombre', 'usuario')}.\n\n"
-            "Ahora puedes hacer preguntas relacionadas con la gestión de fincas."
+            f" f"¡Bienvenido {user.get('nombre', 'usuario')}!\n\n"
+    f"Datos de usuario:\n"
+    f"ID: {user.get('auth_user_id', 'N/A')}\n"
+    f"Rol: {user.get('rol', 'N/A')}\n"
+    f"Email: {user.get('email', 'N/A')}\n\n"
+    "Ahora puedes hacer preguntas relacionadas con la gestión de fincas."
         )
         await update.message.reply_text(mensaje_bienvenida)
         logger.info(f"Usuario autenticado por defecto: {user.get('nombre', user.get('id', 'desconocido'))}")
