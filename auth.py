@@ -145,7 +145,8 @@ def require_role(required_roles: list):
                 logger.error("El token de acceso es requerido para utilizar este recurso.")
                 raise ValueError("Token de acceso requerido")
             user = get_user_from_token(token)
-            user_role = user.get("rol")
+            # Se utiliza 'rol_usuario' para obtener el rol correcto
+            user_role = user.get("rol_usuario")
             if user_role not in required_roles:
                 logger.warning(f"Acceso denegado para usuario con rol '{user_role}'. Roles requeridos: {required_roles}")
                 raise PermissionError("No tiene permiso para acceder a este recurso")
@@ -180,9 +181,10 @@ def authenticate_default() -> (str, dict):
     
     user = response.data[0]
     # Se genera el token con sub igual al valor de auth_user_id para que la verificación futura coincida.
-    token_data = {"sub": user["auth_user_id"], "rol": user.get("rol", "user")}
+    # Se usa 'rol_usuario' y se muestra 'nombre_usuario' en el log.
+    token_data = {"sub": user["auth_user_id"], "rol": user.get("rol_usuario", "user")}
     access_token = create_access_token(data=token_data)
-    logger.info(f"Usuario autenticado por defecto exitosamente: {user.get('nombre', user['auth_user_id'])}. Token generado.")
+    logger.info(f"Usuario autenticado por defecto exitosamente: {user.get('nombre_usuario', user['auth_user_id'])}. Token generado.")
     
     return access_token, user
 
@@ -205,7 +207,7 @@ def iniciar_sesion_bot(context) -> None:
         token, user = authenticate_default()
         context.user_data["token"] = token
         context.user_data["user"] = user
-        logger.info(f"Sesión iniciada correctamente para el usuario: {user.get('nombre', user['auth_user_id'])}")
+        logger.info(f"Sesión iniciada correctamente para el usuario: {user.get('nombre_usuario', user['auth_user_id'])}")
     except Exception as e:
         logger.error(f"Error al iniciar sesión en el bot: {e}")
         raise
@@ -230,7 +232,7 @@ if __name__ == "__main__":
         @require_role(["admin"])
         def recurso_protegido(*args, **kwargs):
             user = kwargs.get("user")
-            return f"Acceso concedido a {user.get('nombre', 'desconocido')}"
+            return f"Acceso concedido a {user.get('nombre_usuario', 'desconocido')}"
         
         resultado = recurso_protegido(token=token)
         logger.info(f"Resultado del recurso protegido (acceso concedido): {resultado}")

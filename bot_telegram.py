@@ -70,15 +70,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         iniciar_sesion_bot(context)
         user = context.user_data.get("user", {})
         mensaje_bienvenida = (
-            f"¡Bienvenido {user.get('nombre', 'usuario')}!\n\n"
+            f"¡Bienvenido {user.get('nombre_usuario', 'usuario')}!\n\n"
             "Detalles de autenticación:\n"
             f"ID: {user.get('auth_user_id', 'N/A')}\n"
-            f"Rol: {user.get('rol', 'N/A')}\n"
-            f"Email: {user.get('email', 'N/A')}\n\n"
+            f"Rol: {user.get('rol_usuario', 'N/A')}\n"
+            f"Email: {user.get('email_usuario', 'N/A')}\n"
+            f"Teléfono: {user.get('telefono_movil', 'N/A')}\n\n"
             "Ahora puedes hacer preguntas relacionadas con la gestión de fincas."
         )
         await update.message.reply_text(mensaje_bienvenida)
-        logger.info(f"Usuario autenticado por defecto: {user.get('nombre', user.get('id', 'desconocido'))}")
+        logger.info(f"Usuario autenticado por defecto: {user.get('nombre_usuario', user.get('auth_user_id', 'desconocido'))}")
     except Exception as e:
         logger.error(f"Error durante la autenticación: {e}", exc_info=True)
         await update.message.reply_text("Error durante la autenticación. Intenta más tarde.")
