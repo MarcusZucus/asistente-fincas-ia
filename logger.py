@@ -3,24 +3,52 @@ import logging.config
 import os
 import sys
 
+# Opcional: integración con Sentry para capturar errores críticos en producción.
+try:
+    import sentry_sdk
+    from sentry_sdk.integrations.logging import LoggingIntegration
+except ImportError:
+    sentry_sdk = None
+
 def setup_logging(default_level=logging.DEBUG):
     """
     Configura el logging para todo el proyecto con:
-      - Console handler (nivel DEBUG y superiores).
+      - Console handler (captura DEBUG y superiores).
       - RotatingFileHandler para logs generales (archivo 'project.log').
       - RotatingFileHandler exclusivo para errores (archivo 'error.log').
+      - Opción de enviar logs de error a Sentry si se configura SENTRY_DSN.
       - Formateo detallado con timestamp, nivel, nombre del logger y número de línea.
       - Captura global de excepciones no controladas para registrar errores inesperados.
       
-    La configuración se basa en un diccionario que permite ampliar o modificar
-    los manejadores y formateadores sin duplicar código en cada módulo.
+    La configuración se adapta al entorno (por ejemplo, desarrollo vs producción) y permite 
+    extender fácilmente la salida de logs para monitorear conexiones, autenticación, Supabase, etc.
     """
+    # Determinar nivel de logging según el entorno
+    entorno = os.getenv("ENTORNO", "desarrollo").lower()
+    if entorno in ["desarrollo", "dev"]:
+        default_level = logging.DEBUG
+    else:
+        default_level = logging.INFO
+
+    # Configurar Sentry si se proporciona un DSN y se tiene instalada la librería
+    sentry_dsn = os.getenv("SENTRY_DSN")
+    if sentry_dsn and sentry_sdk:
+        # Captura los logs de nivel INFO en adelante como breadcrumbs y errores como eventos.
+        sentry_logging = LoggingIntegration(
+            level=logging.INFO,
+            event_level=logging.ERROR
+        )
+        sentry_sdk.init(
+            dsn=sentry_dsn,
+            integrations=[sentry_logging]
+        )
+    
     # Crear directorio para logs si no existe
     log_dir = "logs"
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
-    # Definición de formateadores
+    # Definir formateadores
     formatters = {
         'detailed': {
             'format': '%(asctime)s [%(levelname)s] [%(name)s:%(lineno)d] %(message)s',
@@ -32,7 +60,7 @@ def setup_logging(default_level=logging.DEBUG):
         },
     }
 
-    # Definición de manejadores
+    # Definir manejadores básicos
     handlers = {
         'console': {
             'class': 'logging.StreamHandler',
@@ -54,53 +82,58 @@ def setup_logging(default_level=logging.DEBUG):
             'level': 'ERROR',
             'formatter': 'detailed',
             'filename': os.path.join(log_dir, 'error.log'),
-            'maxBytes': 10 * 1024 * 1024,  # 10 MB
+            'maxBytes': 10 * 1024 * 1024,
             'backupCount': 5,
             'encoding': 'utf8'
         },
     }
 
-    # Configuración global y de loggers específicos
+    # Agregar un handler de Sentry si está configurado
+    if sentry_dsn and sentry_sdk:
+        handlers['sentry'] = {
+            'class': 'sentry_sdk.integrations.logging.EventHandler',
+            'level': 'ERROR'
+        }
+
+    # Configuración del diccionario de logging
     logging_config = {
         'version': 1,
-        'disable_existing_loggers': False,  # Mantener loggers ya configurados
+        'disable_existing_loggers': False,  # Mantiene loggers ya configurados
         'formatters': formatters,
         'handlers': handlers,
         'root': {
-            'handlers': ['console', 'file_all', 'file_error'],
+            'handlers': ['console', 'file_all', 'file_error'] + (['sentry'] if 'sentry' in handlers else []),
             'level': default_level,
         },
         'loggers': {
-            # Configuración específica para módulos como 'supabase' u otros
+            # Logger específico para Supabase (útil si la librería supabase utiliza logging)
             'supabase': {
                 'handlers': ['console', 'file_all'],
                 'level': 'DEBUG',
                 'propagate': False
             },
-            # Se pueden agregar más loggers con configuraciones personalizadas
+            # Otros loggers específicos se pueden agregar aquí...
         }
     }
 
-    # Aplicar la configuración definida
     logging.config.dictConfig(logging_config)
 
-    # Definir función para capturar excepciones no controladas y registrarlas
+    # Captura global de excepciones no controladas para que Railway (y Sentry) las registre
     def handle_exception(exc_type, exc_value, exc_traceback):
         if issubclass(exc_type, KeyboardInterrupt):
-            # Permitir la interrupción normal (Ctrl+C)
             sys.__excepthook__(exc_type, exc_value, exc_traceback)
             return
         logging.critical("Excepción no controlada", exc_info=(exc_type, exc_value, exc_traceback))
 
     sys.excepthook = handle_exception
 
-# Configurar el logging inmediatamente al importar el módulo
+# Configurar el logging al importar el módulo
 setup_logging()
 
 def get_logger(name: str = None) -> logging.Logger:
     """
     Devuelve un logger configurado globalmente. Si se especifica un nombre,
-    se devuelve el logger correspondiente; en caso contrario, se retorna el logger raíz.
+    se devuelve el logger correspondiente; de lo contrario, se retorna el logger raíz.
     
     Args:
       name (str, opcional): Nombre del logger deseado.
