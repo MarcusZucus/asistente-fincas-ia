@@ -1,100 +1,119 @@
 import logging
 import logging.config
-import sys
 import os
+import sys
 
 def setup_logging(default_level=logging.DEBUG):
     """
     Configura el logging para todo el proyecto con:
-      - Console handler (nivel DEBUG y superior).
-      - RotatingFileHandler para todos los logs (archivo 'project.log').
+      - Console handler (nivel DEBUG y superiores).
+      - RotatingFileHandler para logs generales (archivo 'project.log').
       - RotatingFileHandler exclusivo para errores (archivo 'error.log').
       - Formateo detallado con timestamp, nivel, nombre del logger y número de línea.
-      - Manejo global de excepciones no controladas.
+      - Captura global de excepciones no controladas para registrar errores inesperados.
+      
+    La configuración se basa en un diccionario que permite ampliar o modificar
+    los manejadores y formateadores sin duplicar código en cada módulo.
     """
-    # Directorio para los logs
+    # Crear directorio para logs si no existe
     log_dir = "logs"
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
+    # Definición de formateadores
+    formatters = {
+        'detailed': {
+            'format': '%(asctime)s [%(levelname)s] [%(name)s:%(lineno)d] %(message)s',
+            'datefmt': '%Y-%m-%d %H:%M:%S'
+        },
+        'simple': {
+            'format': '%(asctime)s [%(levelname)s] %(message)s',
+            'datefmt': '%Y-%m-%d %H:%M:%S'
+        },
+    }
+
+    # Definición de manejadores
+    handlers = {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'level': 'DEBUG',
+            'formatter': 'simple',
+            'stream': 'ext://sys.stdout'
+        },
+        'file_all': {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'level': 'DEBUG',
+            'formatter': 'detailed',
+            'filename': os.path.join(log_dir, 'project.log'),
+            'maxBytes': 10 * 1024 * 1024,  # 10 MB
+            'backupCount': 5,
+            'encoding': 'utf8'
+        },
+        'file_error': {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'level': 'ERROR',
+            'formatter': 'detailed',
+            'filename': os.path.join(log_dir, 'error.log'),
+            'maxBytes': 10 * 1024 * 1024,  # 10 MB
+            'backupCount': 5,
+            'encoding': 'utf8'
+        },
+    }
+
+    # Configuración global y de loggers específicos
     logging_config = {
         'version': 1,
-        'disable_existing_loggers': False,  # No deshabilitar loggers ya existentes
-        'formatters': {
-            'detailed': {
-                'format': '%(asctime)s [%(levelname)s] [%(name)s:%(lineno)d] %(message)s',
-                'datefmt': '%Y-%m-%d %H:%M:%S'
-            },
-            'simple': {
-                'format': '%(asctime)s [%(levelname)s] %(message)s',
-                'datefmt': '%Y-%m-%d %H:%M:%S'
-            },
-        },
-        'handlers': {
-            'console': {
-                'class': 'logging.StreamHandler',
-                'level': 'DEBUG',
-                'formatter': 'simple',
-                'stream': 'ext://sys.stdout'
-            },
-            'file_all': {
-                'class': 'logging.handlers.RotatingFileHandler',
-                'level': 'DEBUG',
-                'formatter': 'detailed',
-                'filename': os.path.join(log_dir, 'project.log'),
-                'maxBytes': 10 * 1024 * 1024,  # 10 MB
-                'backupCount': 5,
-                'encoding': 'utf8'
-            },
-            'file_error': {
-                'class': 'logging.handlers.RotatingFileHandler',
-                'level': 'ERROR',
-                'formatter': 'detailed',
-                'filename': os.path.join(log_dir, 'error.log'),
-                'maxBytes': 10 * 1024 * 1024,
-                'backupCount': 5,
-                'encoding': 'utf8'
-            },
-        },
+        'disable_existing_loggers': False,  # Mantener loggers ya configurados
+        'formatters': formatters,
+        'handlers': handlers,
         'root': {
             'handlers': ['console', 'file_all', 'file_error'],
             'level': default_level,
         },
         'loggers': {
-            # Ejemplo: configuración específica para el logger "supabase"
+            # Configuración específica para módulos como 'supabase' u otros
             'supabase': {
                 'handlers': ['console', 'file_all'],
                 'level': 'DEBUG',
                 'propagate': False
             },
-            # Puedes agregar más loggers con configuraciones personalizadas si lo requieres.
+            # Se pueden agregar más loggers con configuraciones personalizadas
         }
     }
 
+    # Aplicar la configuración definida
     logging.config.dictConfig(logging_config)
 
-    # Configurar una función global para capturar excepciones no controladas
+    # Definir función para capturar excepciones no controladas y registrarlas
     def handle_exception(exc_type, exc_value, exc_traceback):
         if issubclass(exc_type, KeyboardInterrupt):
-            # No capturamos KeyboardInterrupt para permitir la interrupción normal
+            # Permitir la interrupción normal (Ctrl+C)
             sys.__excepthook__(exc_type, exc_value, exc_traceback)
             return
         logging.critical("Excepción no controlada", exc_info=(exc_type, exc_value, exc_traceback))
 
     sys.excepthook = handle_exception
 
-# Ejecutar la configuración de logging de inmediato al importar el módulo
+# Configurar el logging inmediatamente al importar el módulo
 setup_logging()
 
 def get_logger(name: str = None) -> logging.Logger:
     """
-    Devuelve un logger configurado globalmente. Si no se especifica un nombre, retorna el logger raíz.
+    Devuelve un logger configurado globalmente. Si se especifica un nombre,
+    se devuelve el logger correspondiente; en caso contrario, se retorna el logger raíz.
+    
+    Args:
+      name (str, opcional): Nombre del logger deseado.
+    
+    Returns:
+      logging.Logger: Instancia del logger configurado.
     """
     return logging.getLogger(name)
 
-# Ejemplo de uso y pruebas (se ejecuta solo si se corre este módulo de forma directa)
+# Ejemplo de uso y pruebas (se ejecuta solo cuando se corre este módulo directamente)
 if __name__ == "__main__":
     logger = get_logger(__name__)
+    
     logger.debug("Mensaje DEBUG: trazas internas y variables.")
     logger.info("Mensaje INFO: progreso de la aplicación.")
     logger.warning("Mensaje WARNING: advertencia sobre posibles problemas.")
@@ -103,9 +122,9 @@ if __name__ == "__main__":
 
     # Simulación de excepción controlada
     try:
-        1 / 0
+        result = 1 / 0
     except Exception:
         logger.exception("Ocurrió una excepción al dividir por cero.")
 
-    # Descomenta la siguiente línea para probar el manejo global de excepciones (terminará el programa)
+    # Para probar el manejo global de excepciones, descomenta la siguiente línea:
     # raise ValueError("Excepción no controlada para probar sys.excepthook")
